@@ -182,11 +182,11 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         // );
 
         //ensure any unused tokens are returned to the borrower and position manager balance is zero
-        // assertEq(targetPoolKey.currency0.balanceOf(address(positionManager)), 0);
+        assertEq(targetPoolKey.currency0.balanceOf(address(positionManager)), 0);
         assertEq(targetPoolKey.currency1.balanceOf(address(positionManager)), 0);
 
         //for some reason, there is 1 wei of dust native eth left in the mintPositionHelper contract
-        // assertEq(targetPoolKey.currency0.balanceOf(address(mintPositionHelper)), 0);
+        assertEq(targetPoolKey.currency0.balanceOf(address(mintPositionHelper)), 0);
         assertEq(targetPoolKey.currency1.balanceOf(address(mintPositionHelper)), 0);
 
         amount0 = token0BalanceBefore - targetPoolKey.currency0.balanceOf(owner);
@@ -433,6 +433,17 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
 
         assertEq(currentFees0Owed, expectedFees0 - (expectedFees0 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
         assertEq(currentFees1Owed, expectedFees1 - (expectedFees1 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
+
+        assertGe(
+            currency0.balanceOf(address(wrapper)),
+            currentFees0Owed,
+            "currency0 balance is not equal to feesOwed for token0"
+        );
+        assertGe(
+            currency1.balanceOf(address(wrapper)),
+            currentFees1Owed,
+            "currency1 balance is not equal to feesOwed for token1"
+        );
 
         //now if a user does full unwrap, feesOwed should be zero and the should have gone to the user itself
         wrapper.unwrap(borrower, tokenIdMinted, borrower);

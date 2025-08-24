@@ -18,7 +18,8 @@ import {Currency} from "lib/v4-periphery/lib/v4-core/src/types/Currency.sol";
 /// @author VII Finance
 /// @notice This contract allows EVK vaults to accept Uniswap V4 liquidity positions as collateral
 /// @dev This wrapper is intended exclusively for vanilla Uniswap V4 pools.
-/// @dev Before using this for pools with custom hooks, ensure that the custom hook does not alter how a liquidity position is priced.
+/// @dev This wrapper is compatible with the pools with yield harvesting hook (https://github.com/VII-Finance/yield-harvesting-hook)
+/// @dev Before using this for pools with other custom hooks, ensure that the custom hook does not alter how a liquidity position is priced.
 contract UniswapV4Wrapper is ERC721WrapperBase {
     using SafeCast for uint256;
     using StateLibrary for IPoolManager;
@@ -29,6 +30,9 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
     IPoolManager public immutable poolManager;
     uint256 public immutable unit0;
     uint256 public immutable unit1;
+
+    Currency public immutable currency0;
+    Currency public immutable currency1;
 
     PoolKey public poolKey;
     mapping(uint256 tokenId => TokensOwed) public tokensOwed;
@@ -65,6 +69,9 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         PoolKey memory _poolKey,
         address _weth
     ) ERC721WrapperBase(_evc, _positionManager, _oracle, _unitOfAccount) {
+        currency0 = _poolKey.currency0;
+        currency1 = _poolKey.currency1;
+
         poolKey = _poolKey;
         poolId = _poolKey.toId();
         poolManager = IPositionManager(address(_positionManager)).poolManager();
@@ -74,8 +81,8 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
             weth = _weth;
         }
 
-        unit0 = 10 ** _getDecimals(_getCurrencyAddress(poolKey.currency0));
-        unit1 = 10 ** _getDecimals(_getCurrencyAddress(poolKey.currency1));
+        unit0 = 10 ** _getDecimals(_getCurrencyAddress(_poolKey.currency0));
+        unit1 = 10 ** _getDecimals(_getCurrencyAddress(_poolKey.currency1));
     }
 
     /// @notice Validates that the position belongs to the pool that this wrapper is associated with
@@ -102,24 +109,34 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         uint256 amount,
         bytes calldata extraData
     ) internal override {
-        PositionState memory positionState = _getPositionState(tokenId);
+        uint256 amount0;
+        uint256 amount1;
 
-        (uint256 pendingFees0, uint256 pendingFees1) = _pendingFees(positionState);
-        _accumulateFees(tokenId, pendingFees0, pendingFees1);
+        TokensOwed memory feesOwed = tokensOwed[tokenId];
 
-        uint128 liquidityToRemove = proportionalShare(positionState.liquidity, amount, totalSupplyOfTokenId).toUint128();
-        (uint256 amount0, uint256 amount1) = _principal(positionState, liquidityToRemove);
+        {
+            PositionState memory positionState = _getPositionState(tokenId);
+            uint128 liquidityToRemove =
+                proportionalShare(positionState.liquidity, amount, totalSupplyOfTokenId).toUint128();
+            (amount0, amount1) = _principal(positionState, liquidityToRemove);
 
-        _decreaseLiquidity(tokenId, liquidityToRemove, ActionConstants.MSG_SENDER, extraData);
+            (uint256 amount0Received, uint256 amount1Received) =
+                _decreaseLiquidity(tokenId, liquidityToRemove, ActionConstants.MSG_SENDER, extraData);
 
-        uint256 fees0ToSend = proportionalShare(tokensOwed[tokenId].fees0Owed, amount, totalSupplyOfTokenId);
-        uint256 fees1ToSend = proportionalShare(tokensOwed[tokenId].fees1Owed, amount, totalSupplyOfTokenId);
+            feesOwed.fees0Owed += amount0Received - amount0;
+            feesOwed.fees1Owed += amount1Received - amount1;
+        }
 
-        tokensOwed[tokenId].fees0Owed -= fees0ToSend;
-        tokensOwed[tokenId].fees1Owed -= fees1ToSend;
+        uint256 fees0ToSend = proportionalShare(feesOwed.fees0Owed, amount, totalSupplyOfTokenId);
+        uint256 fees1ToSend = proportionalShare(feesOwed.fees1Owed, amount, totalSupplyOfTokenId);
 
-        poolKey.currency1.transfer(to, amount1 + fees1ToSend);
-        poolKey.currency0.transfer(to, amount0 + fees0ToSend);
+        feesOwed.fees0Owed -= fees0ToSend;
+        feesOwed.fees1Owed -= fees1ToSend;
+
+        tokensOwed[tokenId] = feesOwed;
+
+        currency1.transfer(to, amount1 + fees1ToSend);
+        currency0.transfer(to, amount0 + fees0ToSend);
     }
 
     function _settleFullUnwrap(uint256 tokenId, address to) internal override {
@@ -127,10 +144,10 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         uint256 fees1ToSend = tokensOwed[tokenId].fees1Owed;
         delete tokensOwed[tokenId];
         if (fees1ToSend != 0) {
-            poolKey.currency1.transfer(to, fees1ToSend);
+            currency1.transfer(to, fees1ToSend);
         }
         if (fees0ToSend != 0) {
-            poolKey.currency0.transfer(to, fees0ToSend);
+            currency0.transfer(to, fees0ToSend);
         }
     }
 
@@ -143,8 +160,8 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
         (uint256 amount0, uint256 amount1) = _total(positionState, tokenId);
 
-        uint256 amount0InUnitOfAccount = getQuote(amount0, _getCurrencyAddress(poolKey.currency0));
-        uint256 amount1InUnitOfAccount = getQuote(amount1, _getCurrencyAddress(poolKey.currency1));
+        uint256 amount0InUnitOfAccount = getQuote(amount0, _getCurrencyAddress(currency0));
+        uint256 amount1InUnitOfAccount = getQuote(amount1, _getCurrencyAddress(currency1));
 
         return proportionalShare(amount0InUnitOfAccount + amount1InUnitOfAccount, amount, totalSupply(tokenId));
     }
@@ -172,13 +189,13 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
             liquidity: liquidity,
             feeGrowthInside0LastX128: feeGrowthInside0LastX128,
             feeGrowthInside1LastX128: feeGrowthInside1LastX128,
-            sqrtRatioX96: getSqrtRatioX96(
-                _getCurrencyAddress(poolKey.currency0), _getCurrencyAddress(poolKey.currency1), unit0, unit1
-            )
+            sqrtRatioX96: getSqrtRatioX96(_getCurrencyAddress(currency0), _getCurrencyAddress(currency1), unit0, unit1)
         });
     }
 
     /// @notice Calculates pending fees for a position
+    /// @dev For pools with the yield harvesting hook, this will under-calculate the pending fees because it does not account for interest fees that are pending and yet to be harvested.
+    /// @dev We expect this miscalculation to be minimal, as a healthy swap frequency should ensure that the amount of unharvested pending interest remains low.
     /// @param positionState The position state
     /// @return feesOwed0 Pending fees for token0
     /// @return feesOwed1 Pending fees for token1
@@ -220,7 +237,11 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
     function _decreaseLiquidity(uint256 tokenId, uint128 liquidity, address recipient, bytes calldata extraData)
         internal
+        returns (uint256 amount0Received, uint256 amount1Received)
     {
+        uint256 currency0BalanceBefore = currency0.balanceOfSelf();
+        uint256 currency1BalanceBefore = currency1.balanceOfSelf();
+
         bytes memory actions = new bytes(2);
         actions[0] = bytes1(uint8(Actions.DECREASE_LIQUIDITY));
         actions[1] = bytes1(uint8(Actions.TAKE_PAIR));
@@ -229,9 +250,12 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
         bytes[] memory params = new bytes[](2);
         params[0] = abi.encode(tokenId, liquidity, amount0Min, amount1Min, bytes(""));
-        params[1] = abi.encode(poolKey.currency0, poolKey.currency1, recipient);
+        params[1] = abi.encode(currency0, currency1, recipient);
 
         IPositionManager(address(underlying)).modifyLiquidities(abi.encode(actions, params), deadline);
+
+        amount0Received = currency0.balanceOfSelf() - currency0BalanceBefore;
+        amount1Received = currency1.balanceOfSelf() - currency1BalanceBefore;
     }
 
     function _total(PositionState memory positionState, uint256 tokenId)
@@ -244,11 +268,6 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
         amount0Total = principalAmount0 + pendingFees0 + tokensOwed[tokenId].fees0Owed;
         amount1Total = principalAmount1 + pendingFees1 + tokensOwed[tokenId].fees1Owed;
-    }
-
-    function _accumulateFees(uint256 tokenId, uint256 fees0, uint256 fees1) internal {
-        tokensOwed[tokenId].fees0Owed += fees0;
-        tokensOwed[tokenId].fees1Owed += fees1;
     }
 
     function _decodeExtraData(bytes calldata extraData)

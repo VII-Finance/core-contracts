@@ -209,16 +209,16 @@ contract BaseSetup is Test, Fuzzers {
         );
     }
 
-    function createFuzzyLiquidityParams(LiquidityParams memory params, int24 tickSpacing, uint160 sqrtPriceX96)
+    function createFuzzyLiquidityParams(LiquidityParams memory params, int24 tickSpacing_, uint160 sqrtPriceX96)
         internal
         view
         returns (LiquidityParams memory)
     {
-        (params.tickLower, params.tickUpper) = boundTicks(params.tickLower, params.tickUpper, tickSpacing);
+        (params.tickLower, params.tickUpper) = boundTicks(params.tickLower, params.tickUpper, tickSpacing_);
         int256 liquidityDeltaFromAmounts =
             getLiquidityDeltaFromAmounts(params.tickLower, params.tickUpper, sqrtPriceX96);
 
-        int256 liquidityMaxPerTick = int256(uint256(Pool.tickSpacingToMaxLiquidityPerTick(tickSpacing)));
+        int256 liquidityMaxPerTick = int256(uint256(Pool.tickSpacingToMaxLiquidityPerTick(tickSpacing_)));
 
         int256 liquidityMax =
             liquidityDeltaFromAmounts > liquidityMaxPerTick ? liquidityMaxPerTick : liquidityDeltaFromAmounts;

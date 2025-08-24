@@ -158,8 +158,6 @@ contract Handler is Test, BaseSetup {
             uint256 balance = IEVault(collaterals[i]).balanceOf(account);
             uint256 collateralValue = oracle.getQuote(balance, collaterals[i], unitOfAccount);
 
-            console.log("collateralValue ,valueToBeTransferred: %s, %s", collateralValue, valueToBeTransferred);
-
             if (collaterals[i] == collateral) {
                 if (collateralValue < valueToBeTransferred) {
                     return true; //if the collateral value is less than the value to be transferred, the action should fail
@@ -173,17 +171,7 @@ contract Handler is Test, BaseSetup {
         }
 
         //get user liability value
-        (uint256 collateralValue, uint256 liabilityValue) = vault.accountLiquidity(account, false);
-
-        console.log(
-            "totalCollateralValueAfterTransfer: %s, liabilityValue: %s",
-            totalCollateralValueAfterTransfer,
-            liabilityValue
-        );
-
-        console.log("collateralValue: %s, liabilityValue: %s", collateralValue, liabilityValue);
-
-        console.log("valueToBeTransferred", valueToBeTransferred);
+        (, uint256 liabilityValue) = vault.accountLiquidity(account, false);
 
         if (totalCollateralValueAfterTransfer <= liabilityValue) {
             return true; //if the total collateral value after transfer is less than the liability value, the action should fail

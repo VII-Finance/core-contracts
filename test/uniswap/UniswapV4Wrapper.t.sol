@@ -92,7 +92,9 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
 
         poolId = poolKey.toId();
 
-        ERC721WrapperBase uniswapV4Wrapper = new MockUniswapV4Wrapper(
+        ///@dev A weird coincidence that happened here was that this wrapper was getting deployed at this address: 0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f
+        ///which actually has some ETH balance on ethereum mainnet. It broke some accounting in the tests and took me a while to figure out why. As a workaround I simply added a salt to the constructor
+        ERC721WrapperBase uniswapV4Wrapper = new MockUniswapV4Wrapper{salt: bytes32(uint256(1))}(
             address(evc), address(positionManager), address(oracle), unitOfAccount, poolKey, Addresses.WETH
         );
         mintPositionHelper = new UniswapMintPositionHelper(
@@ -434,15 +436,13 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         assertEq(currentFees0Owed, expectedFees0 - (expectedFees0 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
         assertEq(currentFees1Owed, expectedFees1 - (expectedFees1 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
 
-        assertGe(
+        assertEq(
             currency0.balanceOf(address(wrapper)),
-            currentFees0Owed,
-            "currency0 balance is not equal to feesOwed for token0"
+            currentFees0Owed
         );
-        assertGe(
+        assertEq(
             currency1.balanceOf(address(wrapper)),
-            currentFees1Owed,
-            "currency1 balance is not equal to feesOwed for token1"
+            currentFees1Owed
         );
 
         //now if a user does full unwrap, feesOwed should be zero and the should have gone to the user itself

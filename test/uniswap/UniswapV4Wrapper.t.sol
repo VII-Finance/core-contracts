@@ -7,7 +7,7 @@ import {Addresses} from "test/helpers/Addresses.sol";
 import {IPositionManager} from "lib/v4-periphery/src/interfaces/IPositionManager.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import {EthereumVaultConnector} from "ethereum-vault-connector//EthereumVaultConnector.sol";
+import {EthereumVaultConnector} from "ethereum-vault-connector/EthereumVaultConnector.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -26,7 +26,7 @@ import {FixedRateOracle} from "lib/euler-price-oracle/src/adapter/fixed/FixedRat
 import {IEulerRouter} from "lib/euler-interfaces/interfaces/IEulerRouter.sol";
 import {IERC20} from "lib/openzeppelin-contracts/contracts/interfaces/IERC20.sol";
 import {IERC721} from "lib/openzeppelin-contracts/contracts/interfaces/IERC721.sol";
-import {IEVC} from "ethereum-vault-connector//interfaces/IEthereumVaultConnector.sol";
+import {IEVC} from "ethereum-vault-connector/interfaces/IEthereumVaultConnector.sol";
 import {ERC721WrapperBase} from "src/ERC721WrapperBase.sol";
 import {UniswapBaseTest} from "test/uniswap/UniswapBase.t.sol";
 import {Fuzzers} from "@uniswap/v4-core/src/test/Fuzzers.sol";

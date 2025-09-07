@@ -3,7 +3,7 @@ pragma solidity 0.8.26;
 
 import {UniswapV3Wrapper} from "src/uniswap/UniswapV3Wrapper.sol";
 import {IUniswapV3Factory} from "lib/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
-import {IEVC} from "ethereum-vault-connector//interfaces/IEthereumVaultConnector.sol";
+import {IEVC} from "ethereum-vault-connector/interfaces/IEthereumVaultConnector.sol";
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IEVault} from "lib/euler-interfaces/interfaces/IEVault.sol";

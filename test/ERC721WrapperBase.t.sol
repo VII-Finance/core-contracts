@@ -3,7 +3,7 @@ pragma solidity ^0.8.13;
 
 import {Test, console} from "forge-std/Test.sol";
 import {ERC721WrapperBase} from "src/ERC721WrapperBase.sol";
-import {EthereumVaultConnector} from "ethereum-vault-connector//EthereumVaultConnector.sol";
+import {EthereumVaultConnector} from "ethereum-vault-connector/EthereumVaultConnector.sol";
 import {ERC721} from "lib/openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 import {ERC6909} from "lib/openzeppelin-contracts/contracts/token/ERC6909/draft-ERC6909.sol";
 

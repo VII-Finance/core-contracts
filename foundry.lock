@@ -1,0 +1,35 @@
+{
+  "lib/ethereum-vault-connector": {
+    "rev": "a7d3c29ef7e4964736e47675e0588630d6afbfd7"
+  },
+  "lib/euler-interfaces": {
+    "rev": "6e32696d2db2f72ae48bbbb4a0b73a8a314b36c8"
+  },
+  "lib/euler-price-oracle": {
+    "rev": "ffc3cb82615fc7d003a7f431175bd1eaf0bf41c5"
+  },
+  "lib/euler-vault-kit": {
+    "rev": "5b98b42048ba11ae82fb62dfec06d1010c8e41e6"
+  },
+  "lib/forge-std": {
+    "rev": "77041d2ce690e692d6e03cc812b57d1ddaa4d505"
+  },
+  "lib/openzeppelin-contracts": {
+    "rev": "e4f70216d759d8e6a64144a9e1f7bbeed78e7079"
+  },
+  "lib/v3-core": {
+    "branch": {
+      "name": "0.8",
+      "rev": "6562c52e8f75f0c10f9deaf44861847585fc8129"
+    }
+  },
+  "lib/v3-periphery": {
+    "branch": {
+      "name": "0.8",
+      "rev": "b325bb0905d922ae61fcc7df85ee802e8df5e96c"
+    }
+  },
+  "lib/v4-periphery": {
+    "rev": "ad04c9f24a170accf5ea1b2836bbafd514537ca6"
+  }
+}

@@ -6,7 +6,7 @@ import {IPositionManager} from "lib/v4-periphery/src/interfaces/IPositionManager
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
-import {EVCUtil} from "ethereum-vault-connector//utils/EVCUtil.sol";
+import {EVCUtil} from "ethereum-vault-connector/utils/EVCUtil.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Actions} from "lib/v4-periphery/src/libraries/Actions.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";

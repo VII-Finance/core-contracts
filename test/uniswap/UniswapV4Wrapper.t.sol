@@ -7,7 +7,7 @@ import {Addresses} from "test/helpers/Addresses.sol";
 import {IPositionManager} from "lib/v4-periphery/src/interfaces/IPositionManager.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import {EthereumVaultConnector} from "ethereum-vault-connector//EthereumVaultConnector.sol";
+import {EthereumVaultConnector} from "ethereum-vault-connector/EthereumVaultConnector.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {ERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -26,7 +26,7 @@ import {FixedRateOracle} from "lib/euler-price-oracle/src/adapter/fixed/FixedRat
 import {IEulerRouter} from "lib/euler-interfaces/interfaces/IEulerRouter.sol";
 import {IERC20} from "lib/openzeppelin-contracts/contracts/interfaces/IERC20.sol";
 import {IERC721} from "lib/openzeppelin-contracts/contracts/interfaces/IERC721.sol";
-import {IEVC} from "ethereum-vault-connector//interfaces/IEthereumVaultConnector.sol";
+import {IEVC} from "ethereum-vault-connector/interfaces/IEthereumVaultConnector.sol";
 import {ERC721WrapperBase} from "src/ERC721WrapperBase.sol";
 import {UniswapBaseTest} from "test/uniswap/UniswapBase.t.sol";
 import {Fuzzers} from "@uniswap/v4-core/src/test/Fuzzers.sol";
@@ -92,7 +92,9 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
 
         poolId = poolKey.toId();
 
-        ERC721WrapperBase uniswapV4Wrapper = new MockUniswapV4Wrapper(
+        ///@dev A weird coincidence that happened here was that this wrapper was getting deployed at this address: 0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f
+        ///which actually has some ETH balance on ethereum mainnet. It broke some accounting in the tests and took me a while to figure out why. As a workaround I simply added a salt to the constructor
+        ERC721WrapperBase uniswapV4Wrapper = new MockUniswapV4Wrapper{salt: bytes32(uint256(1))}(
             address(evc), address(positionManager), address(oracle), unitOfAccount, poolKey, Addresses.WETH
         );
         mintPositionHelper = new UniswapMintPositionHelper(
@@ -434,15 +436,13 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         assertEq(currentFees0Owed, expectedFees0 - (expectedFees0 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
         assertEq(currentFees1Owed, expectedFees1 - (expectedFees1 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
 
-        assertGe(
+        assertEq(
             currency0.balanceOf(address(wrapper)),
-            currentFees0Owed,
-            "currency0 balance is not equal to feesOwed for token0"
+            currentFees0Owed
         );
-        assertGe(
+        assertEq(
             currency1.balanceOf(address(wrapper)),
-            currentFees1Owed,
-            "currency1 balance is not equal to feesOwed for token1"
+            currentFees1Owed
         );
 
         //now if a user does full unwrap, feesOwed should be zero and the should have gone to the user itself

@@ -7,7 +7,7 @@ import {ERC6909TokenSupply} from
 import {EnumerableSet} from "lib/openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
 import {Context} from "lib/openzeppelin-contracts/contracts/utils/Context.sol";
 import {IERC721} from "lib/openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
-import {EVCUtil} from "ethereum-vault-connector//utils/EVCUtil.sol";
+import {EVCUtil} from "ethereum-vault-connector/utils/EVCUtil.sol";
 import {IPriceOracle} from "src/interfaces/IPriceOracle.sol";
 import {IERC721WrapperBase} from "src/interfaces/IERC721WrapperBase.sol";
 import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";

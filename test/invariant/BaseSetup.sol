@@ -20,7 +20,7 @@ import {
 } from "lib/v4-periphery/src/PositionManager.sol";
 import {LiquidityAmounts} from "lib/v3-periphery/contracts/libraries/LiquidityAmounts.sol";
 
-import {EthereumVaultConnector} from "ethereum-vault-connector//EthereumVaultConnector.sol";
+import {EthereumVaultConnector} from "ethereum-vault-connector/EthereumVaultConnector.sol";
 
 import {GenericFactory} from "lib/euler-vault-kit/src/GenericFactory/GenericFactory.sol";
 import {EVault} from "lib/euler-vault-kit/src/EVault/EVault.sol";

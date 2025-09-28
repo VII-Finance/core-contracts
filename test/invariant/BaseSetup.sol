@@ -309,7 +309,7 @@ contract BaseSetup is Test, Fuzzers {
         internal
         returns (uint256 tokenIdMinted, uint256 amount0Spent, uint256 amount1Spent)
     {
-        params.liquidityDelta = bound(params.liquidityDelta, 10e18, 10_000e18);
+        params.liquidityDelta = bound(params.liquidityDelta, 1, 10_000e18);
         (uint160 sqrtRatioX96,,,) = poolManager.getSlot0(poolId);
         params = createFuzzyLiquidityParams(params, poolKey.tickSpacing, sqrtRatioX96);
 

@@ -48,15 +48,16 @@ contract CreateV4WrappersScript is Script {
 
         vm.startBroadcast();
 
-        (address uniswapV4Wrapper, address fixedPriceOracleUniswapV4Wrapper) = v4Factory.createUniswapV4Wrapper(
-            address(eulerRouter),
-            unitOfAccount,
-            vaultWrappersPoolKey
-        );
+        (address uniswapV4Wrapper, address fixedPriceOracleUniswapV4Wrapper) =
+            v4Factory.createUniswapV4Wrapper(address(eulerRouter), unitOfAccount, vaultWrappersPoolKey);
 
         //let's also deploy chainlinkInfrequentOracle as well
-        address vaultWrapper0Oracle = createChainlinkInfrequentOracle(vaultWrapper0, ChainlinkInfrequentOracle(eulerRouter.getConfiguredOracle(asset0, unitOfAccount)));
-        address vaultWrapper1Oracle = createChainlinkInfrequentOracle(vaultWrapper1, ChainlinkInfrequentOracle(eulerRouter.getConfiguredOracle(asset1, unitOfAccount)));
+        address vaultWrapper0Oracle = createChainlinkInfrequentOracle(
+            vaultWrapper0, ChainlinkInfrequentOracle(eulerRouter.getConfiguredOracle(asset0, unitOfAccount))
+        );
+        address vaultWrapper1Oracle = createChainlinkInfrequentOracle(
+            vaultWrapper1, ChainlinkInfrequentOracle(eulerRouter.getConfiguredOracle(asset1, unitOfAccount))
+        );
 
         //set the oracles
         eulerRouter.govSetConfig(vaultWrapper0, unitOfAccount, vaultWrapper0Oracle);

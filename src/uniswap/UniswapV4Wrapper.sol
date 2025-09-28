@@ -181,6 +181,7 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
     /// @notice Gets the current state of a position
     /// @param tokenId The position token ID
+    /// @param shouldUseSpotPrice If true, uses the current pool spot price; if false, uses the oracle price
     /// @return positionState The complete position state
     function _getPositionState(uint256 tokenId, bool shouldUseSpotPrice)
         internal

@@ -36,7 +36,7 @@ contract CreateV4WrappersScript is Script {
 
     function run() public {
         // Create instances of the UniswapV4WrapperFactory
-        UniswapV4WrapperFactory v4Factory = UniswapV4WrapperFactory(0x77779400171A3B7d4423554378D600693996a777);
+        UniswapV4WrapperFactory v4Factory = UniswapV4WrapperFactory(0x7777943712740f9877c95411FC0C606C524fc777);
 
         PoolKey memory vaultWrappersPoolKey = PoolKey({
             currency0: vaultWrapper0 < vaultWrapper1 ? Currency.wrap(vaultWrapper0) : Currency.wrap(vaultWrapper1),

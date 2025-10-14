@@ -93,7 +93,10 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
 
         for (uint256 i = 0; i < totalTokenIds; ++i) {
             uint256 tokenId = tokenIdOfOwnerByIndex(sender, i);
-            _transfer(sender, to, tokenId, normalizedToFull(sender, tokenId, amount, currentBalance)); //this concludes the liquidation. The liquidator can come back to do whatever they want with the ERC6909 tokens
+            uint256 balanceOfTokenId = balanceOf(sender, tokenId);
+            if (balanceOfTokenId == 0) continue; //if the tokenId balance of sender is zero, we skip it to avoid 0 transfers
+
+            _transfer(sender, to, tokenId, normalizedToFull(balanceOfTokenId, amount, currentBalance)); //this concludes the liquidation. The liquidator can come back to do whatever they want with the ERC6909 tokens
         }
         return true;
     }
@@ -105,8 +108,10 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
 
         for (uint256 i = 0; i < totalTokenIds; ++i) {
             uint256 tokenId = tokenIdOfOwnerByIndex(owner, i);
-            if (totalSupply(tokenId) == 0) continue; //if the tokenId is not wrapped, we skip it
-            totalValue += calculateValueOfTokenId(tokenId, balanceOf(owner, tokenId));
+            uint256 balanceOfTokenId = balanceOf(owner, tokenId);
+            if (balanceOfTokenId == 0) continue; //if the tokenId balance of sender is zero, we skip it
+
+            totalValue += calculateValueOfTokenId(tokenId, balanceOfTokenId);
         }
     }
 
@@ -186,12 +191,13 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         return Math.mulDiv(amount, part, totalSupplyOfTokenId);
     }
 
-    function normalizedToFull(address user, uint256 tokenId, uint256 amount, uint256 currentBalance)
+    ///@dev rounding is done in favor of the receiver (liquidator in case of liquidation)
+    function normalizedToFull(uint256 balanceOfTokenId, uint256 amount, uint256 currentBalance)
         public
-        view
+        pure
         returns (uint256)
     {
-        return Math.mulDiv(amount, balanceOf(user, tokenId), currentBalance, Math.Rounding.Ceil);
+        return Math.mulDiv(amount, balanceOfTokenId, currentBalance, Math.Rounding.Ceil);
     }
 
     function _getDecimals(address token) internal view returns (uint8) {

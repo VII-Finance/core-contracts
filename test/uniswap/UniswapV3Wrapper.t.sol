@@ -368,7 +368,8 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
 
         transferAmount = bound(transferAmount, 1 + (totalValueBefore / ALLOWED_PRECISION_IN_TESTS), totalValueBefore); // make sure there is some minimum transfer amount
 
-        uint256 erc6909TokensTransferred = wrapper.normalizedToFull(borrower, tokenId, transferAmount, totalValueBefore); // (transferAmount * wrapper.FULL_AMOUNT()) / totalValueBefore;
+        uint256 tokenIdBalance = wrapper.balanceOf(borrower, tokenId);
+        uint256 erc6909TokensTransferred = wrapper.normalizedToFull(tokenIdBalance, transferAmount, totalValueBefore); // (transferAmount * wrapper.FULL_AMOUNT()) / totalValueBefore;
 
         assertTrue(wrapper.transfer(liquidator, transferAmount));
 

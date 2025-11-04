@@ -35,8 +35,9 @@ contract UniswapV4WrapperFactory is BaseUniswapWrapperFactory {
         PoolId poolId = poolKey.toId();
         bytes32 wrapperSalt = _getWrapperSalt(oracle, unitOfAccount, poolId);
 
-        uniswapV4Wrapper =
-            address(new UniswapV4Wrapper{salt: wrapperSalt}(evc, positionManager, oracle, unitOfAccount, poolKey, weth));
+        uniswapV4Wrapper = address(
+            new UniswapV4Wrapper{salt: wrapperSalt}(evc, positionManager, oracle, unitOfAccount, poolKey, weth)
+        );
         fixedRateOracle = _createFixedRateOracle(uniswapV4Wrapper, unitOfAccount);
 
         emit UniswapV4WrapperCreated(uniswapV4Wrapper, fixedRateOracle, poolId, oracle, unitOfAccount, poolKey);

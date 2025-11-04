@@ -33,14 +33,12 @@ contract MockUniswapV3Wrapper is UniswapV3Wrapper {
         (,,,,,,,,,, uint256 tokensOwed0Before, uint256 tokensOwed1Before) =
             INonfungiblePositionManager(address(underlying)).positions(tokenId);
 
-        INonfungiblePositionManager(address(underlying)).collect(
-            INonfungiblePositionManager.CollectParams({
-                tokenId: tokenId,
-                recipient: address(0),
-                amount0Max: 1,
-                amount1Max: 1
-            })
-        );
+        INonfungiblePositionManager(address(underlying))
+            .collect(
+                INonfungiblePositionManager.CollectParams({
+                    tokenId: tokenId, recipient: address(0), amount0Max: 1, amount1Max: 1
+                })
+            );
 
         (,,,,,,,,,, uint256 tokensOwed0After, uint256 tokensOwed1After) =
             INonfungiblePositionManager(address(underlying)).positions(tokenId);
@@ -176,9 +174,8 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
 
     function testGetSqrtRatioX96() public view {
         uint256 fixedDecimals = 10 ** 18;
-        uint160 sqrtRatioX96FromOracle = MockUniswapV3Wrapper(address(wrapper)).getSqrtRatioX96FromOracle(
-            address(token0), address(token1), unit0, unit1
-        );
+        uint160 sqrtRatioX96FromOracle = MockUniswapV3Wrapper(address(wrapper))
+            .getSqrtRatioX96FromOracle(address(token0), address(token1), unit0, unit1);
 
         uint256 sqrtPriceInFixed18Decimal = Math.mulDiv(sqrtRatioX96FromOracle, fixedDecimals, 1 << 96);
         uint256 priceInFixed18Decimal = Math.mulDiv(sqrtPriceInFixed18Decimal, sqrtPriceInFixed18Decimal, fixedDecimals);
@@ -203,9 +200,7 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
 
     function testSkimV3() public {
         LiquidityParams memory params = LiquidityParams({
-            tickLower: TickMath.MIN_TICK + 1,
-            tickUpper: TickMath.MAX_TICK - 1,
-            liquidityDelta: -19999
+            tickLower: TickMath.MIN_TICK + 1, tickUpper: TickMath.MAX_TICK - 1, liquidityDelta: -19999
         });
         (uint256 tokenId,,) = boundLiquidityParamsAndMint(params);
 
@@ -307,9 +302,7 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
     function testFuzzFeeMath(int256 liquidityDelta, uint256 swapAmount) public {
         // liquidityDelta = -19999;
         LiquidityParams memory params = LiquidityParams({
-            tickLower: TickMath.MIN_TICK + 1,
-            tickUpper: TickMath.MAX_TICK - 1,
-            liquidityDelta: liquidityDelta
+            tickLower: TickMath.MIN_TICK + 1, tickUpper: TickMath.MAX_TICK - 1, liquidityDelta: liquidityDelta
         });
 
         swapAmount = bound(swapAmount, 10_000 * unit0, 100_000 * unit0);
@@ -326,17 +319,12 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
         swapExactInput(borrower, address(token0), address(token1), swapAmount);
 
         (
-            ,
-            ,
-            ,
-            ,
-            ,
+            ,,,,,
             int24 tickLower,
             int24 tickUpper,
             uint128 liquidity,
             uint256 feeGrowthInside0LastX128,
-            uint256 feeGrowthInside1LastX128,
-            ,
+            uint256 feeGrowthInside1LastX128,,
         ) = nonFungiblePositionManager.positions(tokenId);
 
         (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128) =

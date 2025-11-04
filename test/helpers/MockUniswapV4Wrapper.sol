@@ -46,9 +46,8 @@ contract MockUniswapV4Wrapper is UniswapV4Wrapper {
 
         _decreaseLiquidity(tokenId, liquidity, recipient);
 
-        (amount0, amount1) = (
-            poolKey.currency0.balanceOf(address(this)) - balance0, poolKey.currency1.balanceOf(address(this)) - balance1
-        );
+        (amount0, amount1) =
+        (poolKey.currency0.balanceOf(address(this)) - balance0, poolKey.currency1.balanceOf(address(this)) - balance1);
     }
 
     function syncFeesOwned(uint256 tokenId) external returns (uint256 actualFees0, uint256 actualFees1) {

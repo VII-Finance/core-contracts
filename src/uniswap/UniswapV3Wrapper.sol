@@ -87,14 +87,17 @@ contract UniswapV3Wrapper is ERC721WrapperBase {
         //amount0 and amount1 is the part of the liquidity
         //token0Owed - amount0 and token1Owed - amount1 are the total fees (the principal is always collected in the same tx). part of the fees needs to be sent to the recipient as well
 
-        INonfungiblePositionManager(address(underlying)).collect(
-            INonfungiblePositionManager.CollectParams({
-                tokenId: tokenId,
-                recipient: to,
-                amount0Max: (amount0 + proportionalShare((tokensOwed0 - amount0), amount, totalSupplyOfTokenId)).toUint128(),
-                amount1Max: (amount1 + proportionalShare((tokensOwed1 - amount1), amount, totalSupplyOfTokenId)).toUint128()
-            })
-        );
+        INonfungiblePositionManager(address(underlying))
+            .collect(
+                INonfungiblePositionManager.CollectParams({
+                    tokenId: tokenId,
+                    recipient: to,
+                    amount0Max: (amount0 + proportionalShare((tokensOwed0 - amount0), amount, totalSupplyOfTokenId))
+                    .toUint128(),
+                    amount1Max: (amount1 + proportionalShare((tokensOwed1 - amount1), amount, totalSupplyOfTokenId))
+                    .toUint128()
+                })
+            );
     }
 
     function _settleFullUnwrap(uint256 tokenId, address to) internal override {}
@@ -106,15 +109,16 @@ contract UniswapV3Wrapper is ERC721WrapperBase {
         (uint256 amount0Min, uint256 amount1Min, uint256 deadline) =
             extraData.length == 96 ? abi.decode(extraData, (uint256, uint256, uint256)) : (0, 0, block.timestamp);
 
-        (amount0, amount1) = INonfungiblePositionManager(address(underlying)).decreaseLiquidity(
-            INonfungiblePositionManager.DecreaseLiquidityParams({
-                tokenId: tokenId,
-                liquidity: liquidity,
-                amount0Min: amount0Min,
-                amount1Min: amount1Min,
-                deadline: deadline
-            })
-        );
+        (amount0, amount1) = INonfungiblePositionManager(address(underlying))
+            .decreaseLiquidity(
+                INonfungiblePositionManager.DecreaseLiquidityParams({
+                    tokenId: tokenId,
+                    liquidity: liquidity,
+                    amount0Min: amount0Min,
+                    amount1Min: amount1Min,
+                    deadline: deadline
+                })
+            );
     }
 
     /// @dev Returns the last tokenId owned by this contract from the NonFungiblePositionManager,
@@ -143,11 +147,7 @@ contract UniswapV3Wrapper is ERC721WrapperBase {
         returns (uint256 amount0Total, uint256 amount1Total)
     {
         (
-            ,
-            ,
-            ,
-            ,
-            ,
+            ,,,,,
             int24 tickLower,
             int24 tickUpper,
             uint128 liquidity,

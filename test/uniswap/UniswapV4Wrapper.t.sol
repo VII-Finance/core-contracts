@@ -252,9 +252,8 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
 
     function testGetSqrtRatioX96() public view {
         uint256 fixedDecimals = 10 ** 18;
-        uint160 sqrtRatioX96FromOracle = MockUniswapV4Wrapper(payable(address(wrapper))).getSqrtRatioX96FromOracle(
-            address(token0), address(token1), unit0, unit1
-        );
+        uint160 sqrtRatioX96FromOracle = MockUniswapV4Wrapper(payable(address(wrapper)))
+            .getSqrtRatioX96FromOracle(address(token0), address(token1), unit0, unit1);
 
         uint256 sqrtPriceInFixed18Decimal = Math.mulDiv(sqrtRatioX96FromOracle, fixedDecimals, 1 << 96);
 
@@ -287,9 +286,7 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
 
     function testSkim() public {
         LiquidityParams memory params = LiquidityParams({
-            tickLower: TickMath.MIN_TICK + 1,
-            tickUpper: TickMath.MAX_TICK - 1,
-            liquidityDelta: -19999
+            tickLower: TickMath.MIN_TICK + 1, tickUpper: TickMath.MAX_TICK - 1, liquidityDelta: -19999
         });
         (tokenId,,) = boundLiquidityParamsAndMint(params);
 
@@ -356,9 +353,7 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
 
     function testFuzzFeeMath(int256 liquidityDelta, uint256 swapAmount) public {
         LiquidityParams memory params = LiquidityParams({
-            tickLower: TickMath.MIN_TICK + 1,
-            tickUpper: TickMath.MAX_TICK - 1,
-            liquidityDelta: liquidityDelta
+            tickLower: TickMath.MIN_TICK + 1, tickUpper: TickMath.MAX_TICK - 1, liquidityDelta: liquidityDelta
         });
 
         swapAmount = bound(swapAmount, 10_000 * unit0, 100_000 * unit0);
@@ -390,9 +385,7 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         uint256 partialUnwrapAmount
     ) public {
         LiquidityParams memory params = LiquidityParams({
-            tickLower: TickMath.MIN_TICK + 1,
-            tickUpper: TickMath.MAX_TICK - 1,
-            liquidityDelta: liquidityDelta
+            tickLower: TickMath.MIN_TICK + 1, tickUpper: TickMath.MAX_TICK - 1, liquidityDelta: liquidityDelta
         });
 
         (uint256 tokenIdMinted, uint256 amount0, uint256 amount1) = boundLiquidityParamsAndMint(params);

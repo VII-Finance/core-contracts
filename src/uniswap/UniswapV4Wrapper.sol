@@ -189,8 +189,9 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         returns (PositionState memory positionState)
     {
         PositionInfo position = IPositionManager(address(underlying)).positionInfo(tokenId);
-        (uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128) = poolManager
-            .getPositionInfo(poolId, address(underlying), position.tickLower(), position.tickUpper(), bytes32(tokenId));
+        (uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128) = poolManager.getPositionInfo(
+            poolId, address(underlying), position.tickLower(), position.tickUpper(), bytes32(tokenId)
+        );
 
         uint160 sqrtRatioX96;
         if (shouldUseSpotPrice) {

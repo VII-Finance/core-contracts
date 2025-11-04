@@ -10,6 +10,8 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {ActionConstants} from "lib/v4-periphery/src/libraries/ActionConstants.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
+///@dev all of the testing uses spot price and not the oracle price
+///In reality, the oracle price is used instead of the pool spot price to calculate how much a liquidity position is worth
 contract MockUniswapV4Wrapper is UniswapV4Wrapper {
     using StateLibrary for IPoolManager;
     using SafeCast for uint256;
@@ -58,12 +60,12 @@ contract MockUniswapV4Wrapper is UniswapV4Wrapper {
     }
 
     function pendingFees(uint256 tokenId) external view returns (uint256 fees0Owed, uint256 fees1Owed) {
-        PositionState memory positionState = _getPositionState(tokenId);
+        PositionState memory positionState = _getPositionState(tokenId, true);
         return _pendingFees(positionState);
     }
 
     function total(uint256 tokenId) external view returns (uint256 amount0Total, uint256 amount1Total) {
-        PositionState memory positionState = _getPositionState(tokenId);
+        PositionState memory positionState = _getPositionState(tokenId, true);
         return _total(positionState, tokenId);
     }
 
@@ -72,7 +74,7 @@ contract MockUniswapV4Wrapper is UniswapV4Wrapper {
         uint256 unwrapAmount,
         uint256 balanceBeforeUnwrap
     ) public view returns (uint256) {
-        PositionState memory positionState = _getPositionState(tokenId);
+        PositionState memory positionState = _getPositionState(tokenId, true);
         uint128 liquidityToRemove =
             proportionalShare(positionState.liquidity, unwrapAmount, totalSupply(tokenId)).toUint128();
 

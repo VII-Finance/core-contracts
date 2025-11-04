@@ -436,14 +436,8 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         assertEq(currentFees0Owed, expectedFees0 - (expectedFees0 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
         assertEq(currentFees1Owed, expectedFees1 - (expectedFees1 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
 
-        assertEq(
-            currency0.balanceOf(address(wrapper)),
-            currentFees0Owed
-        );
-        assertEq(
-            currency1.balanceOf(address(wrapper)),
-            currentFees1Owed
-        );
+        assertEq(currency0.balanceOf(address(wrapper)), currentFees0Owed);
+        assertEq(currency1.balanceOf(address(wrapper)), currentFees1Owed);
 
         //now if a user does full unwrap, feesOwed should be zero and the should have gone to the user itself
         wrapper.unwrap(borrower, tokenIdMinted, borrower);
@@ -487,7 +481,8 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         vm.assume(totalValueBefore > 0);
         transferAmount = bound(transferAmount, 1 + (totalValueBefore / ALLOWED_PRECISION_IN_TESTS), totalValueBefore);
 
-        uint256 erc6909TokensTransferred = wrapper.normalizedToFull(borrower, tokenId, transferAmount, totalValueBefore); // (transferAmount * wrapper.FULL_AMOUNT()) / totalValueBefore;
+        uint256 tokenIdBalance = wrapper.balanceOf(borrower, tokenId);
+        uint256 erc6909TokensTransferred = wrapper.normalizedToFull(tokenIdBalance, transferAmount, totalValueBefore); // (transferAmount * wrapper.FULL_AMOUNT()) / totalValueBefore;
 
         assertTrue(wrapper.transfer(liquidator, transferAmount));
 
@@ -510,5 +505,36 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
 
     function test_basicLiquidationV4() public {
         basicLiquidationTest();
+    }
+
+    function testUnwrap_Unichain() public {
+        string memory fork_url = vm.envString("UNICHAIN_RPC_URL");
+        vm.createSelectFork(fork_url, 28206234);
+
+        poolKey = PoolKey({
+            currency0: Currency.wrap(address(0x7b793B1388e14F03e19dc562470e7D25B2Ae9b97)), //WETH
+            currency1: Currency.wrap(address(0x9C383Fa23Dd981b361F0495Ba53dDeB91c750064)), //USDC
+            fee: 18, //0.05% fee
+            tickSpacing: 1,
+            hooks: IHooks(0x777ef319C338C6ffE32A2283F603db603E8F2A80)
+        });
+
+        wrapper = new MockUniswapV4Wrapper{salt: bytes32(uint256(1))}(
+            address(0x2A1176964F5D7caE5406B627Bf6166664FE83c60),
+            address(0x4529A01c7A0410167c5740C487A8DE60232617bf),
+            address(0x4267e3012799A804738A73A2Fa9eB4fD441ceEFF),
+            0x0000000000000000000000000000000000000348,
+            poolKey,
+            Addresses.WETH
+        );
+
+        borrower = 0x69196bC5035cE85C28DAc0c57D0F27f50712A0B2;
+        tokenId = 1428340; // we know this tokenId is worth $7K
+
+        vm.startPrank(borrower);
+        wrapper.underlying().approve(address(wrapper), tokenId);
+        wrapper.wrap(tokenId, borrower);
+        wrapper.unwrap(borrower, tokenId, borrower, wrapper.FULL_AMOUNT(), "");
+        vm.stopPrank();
     }
 }

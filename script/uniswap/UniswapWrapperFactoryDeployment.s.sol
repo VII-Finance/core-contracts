@@ -23,7 +23,7 @@ contract UniswapWrapperFactoryDeploymentScript is Script {
     {
         bytes memory creationCodeWithArgs = abi.encodePacked(creationCode, constructorArgs);
         // console.log("deployer", deployer);
-        // console.logBytes32(keccak256(creationCodeWithArgs));
+        console.logBytes32(keccak256(creationCodeWithArgs));
 
         for (uint256 i = 0; i < type(uint256).max; i++) {
             address computed = computeAddress(deployer, i, creationCodeWithArgs);
@@ -60,7 +60,7 @@ contract UniswapWrapperFactoryDeploymentScript is Script {
         uint256 v4Salt = findVanitySalt(
             CREATE2_FACTORY, type(UniswapV4WrapperFactory).creationCode, abi.encode(evc, v4PositionManager, weth)
         );
-        v4Salt = 89803064614613559128942510503412517851878641377354393196606698967848670379431;
+        v4Salt = 76508893199692067667885840213832328288724823780803052223500390527924915937700;
 
         vm.startBroadcast();
 

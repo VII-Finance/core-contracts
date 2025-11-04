@@ -115,7 +115,8 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         TokensOwed memory feesOwed = tokensOwed[tokenId];
 
         {
-            PositionState memory positionState = _getPositionState(tokenId);
+            // Here we are using the pool's spot price to calculate how much the liquidity is worth in underlying tokens
+            PositionState memory positionState = _getPositionState(tokenId, true);
             uint128 liquidityToRemove =
                 proportionalShare(positionState.liquidity, amount, totalSupplyOfTokenId).toUint128();
             (amount0, amount1) = _principal(positionState, liquidityToRemove);
@@ -152,11 +153,13 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
     }
 
     /// @notice Calculates the proportional value of a position in unit of account terms
+    /// @dev This calculation disregards the current pool spot price and instead uses the oracle price
+    ///      to determine how much the liquidity position is worth
     /// @param tokenId The ID of the position token to evaluate
     /// @param amount The proportion of the position to value
     /// @return the proportional value of the specified position in unit of account
     function calculateValueOfTokenId(uint256 tokenId, uint256 amount) public view override returns (uint256) {
-        PositionState memory positionState = _getPositionState(tokenId);
+        PositionState memory positionState = _getPositionState(tokenId, false);
 
         (uint256 amount0, uint256 amount1) = _total(positionState, tokenId);
 
@@ -178,18 +181,30 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
     /// @notice Gets the current state of a position
     /// @param tokenId The position token ID
+    /// @param shouldUseSpotPrice If true, uses the current pool spot price; if false, uses the oracle price
     /// @return positionState The complete position state
-    function _getPositionState(uint256 tokenId) internal view returns (PositionState memory positionState) {
+    function _getPositionState(uint256 tokenId, bool shouldUseSpotPrice)
+        internal
+        view
+        returns (PositionState memory positionState)
+    {
         PositionInfo position = IPositionManager(address(underlying)).positionInfo(tokenId);
         (uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128) = poolManager
             .getPositionInfo(poolId, address(underlying), position.tickLower(), position.tickUpper(), bytes32(tokenId));
+
+        uint160 sqrtRatioX96;
+        if (shouldUseSpotPrice) {
+            (sqrtRatioX96,,,) = poolManager.getSlot0(poolId);
+        } else {
+            sqrtRatioX96 = getSqrtRatioX96(_getCurrencyAddress(currency0), _getCurrencyAddress(currency1), unit0, unit1);
+        }
 
         positionState = PositionState({
             position: position,
             liquidity: liquidity,
             feeGrowthInside0LastX128: feeGrowthInside0LastX128,
             feeGrowthInside1LastX128: feeGrowthInside1LastX128,
-            sqrtRatioX96: getSqrtRatioX96(_getCurrencyAddress(currency0), _getCurrencyAddress(currency1), unit0, unit1)
+            sqrtRatioX96: sqrtRatioX96
         });
     }
 

@@ -63,7 +63,7 @@ contract MockUniswapV3Wrapper is UniswapV3Wrapper {
         return _totalPositionValue(sqrtRatioX96, tokenId);
     }
 
-    //All of tests uses the spot price from the pool instead of the oracle
+    //All of tests use the spot price from the pool instead of the oracle
     function getSqrtRatioX96(address, address, uint256, uint256) public view override returns (uint160 sqrtRatioX96) {
         (sqrtRatioX96,,,,,,) = pool.slot0();
     }

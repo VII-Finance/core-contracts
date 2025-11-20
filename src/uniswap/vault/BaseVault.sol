@@ -15,10 +15,12 @@ import {IEVC} from "lib/ethereum-vault-connector/src/interfaces/IEthereumVaultCo
 import {EVCUtil} from "lib/ethereum-vault-connector/src/utils/EVCUtil.sol";
 import {IEVCUtil} from "src/interfaces/IEVCUtil.sol";
 import {IEVault} from "lib/euler-interfaces/interfaces/IEVault.sol";
+import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {console} from "lib/forge-std/src/console.sol";
 
 abstract contract BaseVault is ERC4626, EVCUtil {
     using SafeERC20 for IERC20;
+    using Math for uint256;
     IERC721WrapperBase public immutable wrapper;
 
     address public immutable borrowToken;
@@ -75,10 +77,6 @@ abstract contract BaseVault is ERC4626, EVCUtil {
     // this is avoids the inflations attacks + during the normal deposits, we don't have to mint the tokenID
     // we just increase the liquidity as we already know tokenId has already been minted.
     function initializeVault(uint256 assetAmount) external {
-        //calculate the debt to borrow. should be the same in USD value as the assetAmount
-        //we can enforce this by getting the current price in USD from the wrapper and make sure
-        //it is within respectable bounds
-
         if (tokenId != 0) {
             revert VaultAlreadyInitialized();
         }
@@ -86,9 +84,10 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         IERC20(asset()).safeTransferFrom(_msgSender(), assetsReceiver(), assetAmount);
 
         bool isTokenBeingBorrowedToken0_ = isTokenBeingBorrowedToken0();
+        //calculate the debt to borrow. should be the same in USD value as the assetAmount
+        //we can enforce this by getting the current price in USD from the wrapper and make sure
+        //it is within respectable bounds
         (uint256 debtAmount, uint128 liquidity) = getDebtAmount(assetAmount);
-        console.log("debtAmount: ", debtAmount);
-        console.log("liquidity: ", liquidity);
 
         IEVC.BatchItem[] memory batchItems = new IEVC.BatchItem[](2);
 
@@ -110,6 +109,8 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         });
 
         evc.batch(batchItems);
+
+        //we need to mint some initial tokens to zero address
     }
 
     function getDebtAmount(uint256 assets) public view returns (uint256 debtAmount, uint128 liquidity) {
@@ -161,5 +162,14 @@ abstract contract BaseVault is ERC4626, EVCUtil {
 
     function _msgSender() internal view virtual override(Context, EVCUtil) returns (address) {
         return EVCUtil._msgSender();
+    }
+
+    //no need for virtual deposits. When initializing the vault, we are minting some shares to the zero address
+    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view override returns (uint256) {
+        return assets.mulDiv(totalSupply(), totalAssets(), rounding);
+    }
+
+    function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view override returns (uint256) {
+        return shares.mulDiv(totalAssets(), totalSupply(), rounding);
     }
 }

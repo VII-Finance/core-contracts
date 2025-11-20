@@ -24,8 +24,13 @@ contract UniswapV4VaultTest is BaseVaultTest {
     Currency currency1;
     bool public constant TEST_NATIVE_ETH = true;
 
+    function setUp() public override {
+        BaseVaultTest.setUp();
+        initialAmount = 1e18;
+    }
+
     function deployVault() internal override returns (BaseVault) {
-        return new UniswapV4Vault(wrapper, IERC20(Addresses.WETH));
+        return new UniswapV4Vault(wrapper, IERC20(Addresses.WETH), eVault);
     }
 
     //copied over from test/uniswap/UniswapV3Wrapper.t.sol

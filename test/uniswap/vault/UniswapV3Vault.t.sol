@@ -30,8 +30,13 @@ contract UniswapV3VaultTest is BaseVaultTest {
     IUniswapV3Factory factory;
     int24 tickSpacing;
 
+    function setUp() public override {
+        BaseVaultTest.setUp();
+        initialAmount = 1e6;
+    }
+
     function deployVault() internal override returns (BaseVault) {
-        return new UniswapV3Vault(wrapper, IERC20(Addresses.USDT));
+        return new UniswapV3Vault(wrapper, IERC20(Addresses.USDT), eVault);
     }
 
     //copied over from test/uniswap/UniswapV3Wrapper.t.sol

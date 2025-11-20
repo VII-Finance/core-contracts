@@ -88,6 +88,7 @@ contract UniswapBaseTest is Test, Fuzzers {
         address governorAdmin = eVault.governorAdmin();
         startHoax(governorAdmin);
         eVault.setLTV(address(wrapper), 0.9e4, 0.9e4, 0);
+        vm.stopPrank();
     }
 
     struct LiquidityParams {

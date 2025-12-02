@@ -113,6 +113,24 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         //we need to mint some initial tokens to zero address
     }
 
+    function calculateAmounts(uint256 tokenId) public virtual view returns(uint256,uint256);
+
+    // totalAssets, we need to get the total eth that the underlying position holds and get stablecoin amount as well
+    // convert the stablecoing amount - debt into eth amount using the current price. Then add the eth amount to get totalAssets
+    // how do we use the sqrtPriceX96 to convert amounts?
+    function totalAssets() override public view returns(uint256){
+        if(tokenId == 0) return 0;
+
+        //we need to get how much amount0 and amount1 the underlying token is worth. 
+        //The plan is to do the calculations here in this contract instead of doing an external call 
+        (uint256 amount0, uint256 amount1) = calculateAmounts(tokenId);
+        uint256 currentPrice = getCurrentSqrtPriceX96();
+
+        uint256 borrowedAmount = borrowVault.debtOf(address(this));
+
+        int256 effectiveBorrowTokenAmount = int256(isTokenBeingBorrowedToken0() ? amount0 : amount1) - int256(borrowedAmount);
+    }
+
     function getDebtAmount(uint256 assets) public view returns (uint256 debtAmount, uint128 liquidity) {
         uint160 sqrtRatioLowerX96 = TickMath.getSqrtPriceAtTick(tickLower);
         uint160 sqrtRatioUpperX96 = TickMath.getSqrtPriceAtTick(tickUpper);

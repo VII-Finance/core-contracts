@@ -115,12 +115,12 @@ contract Handler is Test, BaseSetup {
     function mintPositionAndWrap(uint256 actorIndexSeed, bool isV3, LiquidityParams memory params)
         public
         useActor(actorIndexSeed)
-        useUniswapWrapper(false)
+        useUniswapWrapper(isV3)
     {
-        (uint256 tokenIdMinted,,) = boundLiquidityParamsAndMint(currentActor, params, false);
+        (uint256 tokenIdMinted,,) = boundLiquidityParamsAndMint(currentActor, params, isV3);
 
         startHoax(currentActor);
-        positionManager.approve(address(uniswapWrapper), tokenIdMinted);
+        uniswapWrapper.underlying().approve(address(uniswapWrapper), tokenIdMinted);
 
         //randomly generate a receiver address
         address receiver = actors[bound(actorIndexSeed / 2, 0, actors.length - 1)];
@@ -194,7 +194,7 @@ contract Handler is Test, BaseSetup {
         uint256 toIndexSeed,
         uint256 tokenIdIndexSeed,
         uint256 transferAmount
-    ) public useActor(actorIndexSeed) useUniswapWrapper(false) {
+    ) public useActor(actorIndexSeed) useUniswapWrapper(isV3) {
         uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor);
         if (tokenIds.length == 0) {
             return; //skip if current actor has no tokenIds
@@ -270,7 +270,7 @@ contract Handler is Test, BaseSetup {
     function partialUnwrap(uint256 actorIndexSeed, bool isV3, uint256 tokenIdIndexSeed, uint256 unwrapAmount)
         public
         useActor(actorIndexSeed)
-        useUniswapWrapper(false)
+        useUniswapWrapper(isV3)
     {
         uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor);
         if (tokenIds.length == 0) {
@@ -325,7 +325,7 @@ contract Handler is Test, BaseSetup {
     function enableTokenIdAsCollateral(uint256 actorIndexSeed, bool isV3, uint256 tokenIdIndexSeed)
         public
         useActor(actorIndexSeed)
-        useUniswapWrapper(false)
+        useUniswapWrapper(isV3)
     {
         uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor);
         if (tokenIds.length == 0) {
@@ -363,7 +363,7 @@ contract Handler is Test, BaseSetup {
     function disableTokenIdAsCollateral(uint256 actorIndexSeed, bool isV3, uint256 tokenIdIndexSeed)
         public
         useActor(actorIndexSeed)
-        useUniswapWrapper(false)
+        useUniswapWrapper(isV3)
     {
         uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor);
         if (tokenIds.length == 0) {
@@ -410,7 +410,7 @@ contract Handler is Test, BaseSetup {
         bool isV3,
         uint256 toIndexSeed,
         uint256 transferAmount
-    ) public useActor(actorIndexSeed) useUniswapWrapper(false) {
+    ) public useActor(actorIndexSeed) useUniswapWrapper(isV3) {
         address to = actors[bound(toIndexSeed, 0, actors.length - 1)];
 
         uint256 fromBalanceBeforeTransfer = uniswapWrapper.balanceOf(currentActor);
@@ -545,7 +545,7 @@ contract Handler is Test, BaseSetup {
     function borrowTokenA(uint256 actorIndexSeed, bool isV3, uint256 borrowAmount)
         public
         useActor(actorIndexSeed)
-        useUniswapWrapper(false)
+        useUniswapWrapper(isV3)
     {
         borrowUpToMax(currentActor, eTokenAVault, borrowAmount);
     }
@@ -553,7 +553,7 @@ contract Handler is Test, BaseSetup {
     function borrowTokenB(uint256 actorIndexSeed, bool isV3, uint256 borrowAmount)
         public
         useActor(actorIndexSeed)
-        useUniswapWrapper(false)
+        useUniswapWrapper(isV3)
     {
         borrowUpToMax(currentActor, eTokenBVault, borrowAmount);
     }

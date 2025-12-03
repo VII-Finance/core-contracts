@@ -221,6 +221,7 @@ contract BaseSetup is Test, Fuzzers {
         );
 
         v3Pool = IUniswapV3Pool(v3Factory.createPool(address(tokenA), address(tokenB), fee));
+        v3Pool.initialize(Constants.SQRT_PRICE_1_1);
         uniswapV3Wrapper = new MockUniswapV3Wrapper(
             address(evc), address(nonFungiblePositionManager), address(oracle), unitOfAccount, address(v3Pool)
         );
@@ -239,9 +240,8 @@ contract BaseSetup is Test, Fuzzers {
         eTokenAVault.setLTV(address(uniswapV3Wrapper), 0.9e4, 0.9e4, 0); // 90% LTV
         eTokenBVault.setLTV(address(uniswapV3Wrapper), 0.9e4, 0.9e4, 0); // 90% LTV
 
-        mintPositionHelper = new UniswapMintPositionHelper(
-            address(evc), address(new MockReturnsWETH9(address(weth))), address(positionManager)
-        );
+        mintPositionHelper =
+            new UniswapMintPositionHelper(address(evc), address(nonFungiblePositionManager), address(positionManager));
     }
 
     //mint a new position
@@ -312,17 +312,29 @@ contract BaseSetup is Test, Fuzzers {
         uint256 liquidityToAdd,
         address owner
     ) internal returns (uint256 tokenIdMinted, uint256 amount0, uint256 amount1) {
-        deal(address(tokenA), owner, amount0Desired * 2 + 1);
-        deal(address(tokenB), owner, amount1Desired * 2 + 1);
+        deal(address(token0), owner, amount0Desired);
+        deal(address(token1), owner, amount1Desired);
 
         startHoax(owner);
-        tokenA.approve(address(mintPositionHelper), amount0Desired * 2 + 1);
-        tokenB.approve(address(mintPositionHelper), amount1Desired * 2 + 1);
+        token0.approve(address(mintPositionHelper), amount0Desired);
+        token1.approve(address(mintPositionHelper), amount1Desired);
+
+        (uint160 sqrtRatioX96,,,,,,) = v3Pool.slot0();
+
+        uint128 effectiveLiquidity = LiquidityAmounts.getLiquidityForAmounts(
+            sqrtRatioX96,
+            TickMath.getSqrtPriceAtTick(tickLower),
+            TickMath.getSqrtPriceAtTick(tickUpper),
+            amount0Desired,
+            amount1Desired
+        );
+        //if the effective liquidity is zero, the mint fails in UniswapV3Pool as it is not allowed
+        vm.assume(effectiveLiquidity != 0);
 
         (tokenIdMinted,, amount0, amount1) = mintPositionHelper.mintPosition(
             INonfungiblePositionManager.MintParams({
-                token0: address(tokenA),
-                token1: address(tokenB),
+                token0: address(token0),
+                token1: address(token1),
                 fee: fee,
                 tickLower: tickLower,
                 tickUpper: tickUpper,
@@ -354,7 +366,9 @@ contract BaseSetup is Test, Fuzzers {
         int256 liquidityDeltaFromAmounts =
             getLiquidityDeltaFromAmounts(params.tickLower, params.tickUpper, sqrtPriceX96);
 
-        int256 liquidityMaxPerTick = int256(uint256(Pool.tickSpacingToMaxLiquidityPerTick(tickSpacing_)));
+        int256 liquidityMaxPerTick = isV3
+            ? int256(uint256(v3Pool.maxLiquidityPerTick()))
+            : int256(uint256(Pool.tickSpacingToMaxLiquidityPerTick(tickSpacing_)));
 
         int256 liquidityMax =
             liquidityDeltaFromAmounts > liquidityMaxPerTick ? liquidityMaxPerTick : liquidityDeltaFromAmounts;
@@ -393,7 +407,7 @@ contract BaseSetup is Test, Fuzzers {
             (sqrtRatioX96,,,) = poolManager.getSlot0(poolId);
         }
 
-        params = createFuzzyLiquidityParams(params, isV3, poolKey.tickSpacing, sqrtRatioX96);
+        params = createFuzzyLiquidityParams(params, isV3, tickSpacing, sqrtRatioX96);
 
         (uint256 estimatedAmount0Required, uint256 estimatedAmount1Required) = LiquidityAmounts.getAmountsForLiquidity(
             sqrtRatioX96,

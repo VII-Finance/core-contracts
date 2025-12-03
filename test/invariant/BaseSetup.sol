@@ -140,7 +140,7 @@ contract BaseSetup is Test, Fuzzers {
         v3Factory = IUniswapV3Factory(deployedAddr);
 
         //NonFungiblePositionManager.bytecode was created by converting the hex bytecode from NonFungiblePositionsManager artifact to binary file format
-        bytecode = vm.readFileBinary("test/bin/NonfungiblePositionManager.bytecode");
+        bytecode = vm.readFileBinary("test/bin/nonFungiblePositionManager.bytecode");
         //expected constructor args: address _factory, address _WETH9, address _NFTDescriptor
         bytecode = abi.encodePacked(bytecode, abi.encode(address(v3Factory), address(weth), address(0)));
         assembly {

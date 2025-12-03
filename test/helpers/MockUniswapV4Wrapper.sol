@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity 0.8.26;
 
-import {UniswapV4Wrapper} from "src/uniswap/UniswapV4Wrapper.sol";
+import {ERC721WrapperBase, UniswapV4Wrapper} from "src/uniswap/UniswapV4Wrapper.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPositionManager} from "lib/v4-periphery/src/interfaces/IPositionManager.sol";
@@ -12,6 +12,7 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 ///@dev all of the testing uses spot price and not the oracle price
 ///In reality, the oracle price is used instead of the pool spot price to calculate how much a liquidity position is worth
+///This contract should follow IMockUniswapWrapper interface to make sure invariant tests work correctly
 contract MockUniswapV4Wrapper is UniswapV4Wrapper {
     using StateLibrary for IPoolManager;
     using SafeCast for uint256;

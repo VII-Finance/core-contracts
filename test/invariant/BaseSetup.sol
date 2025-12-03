@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 // forge-std
-import {Test} from "forge-std/Test.sol";
+import {Test, console} from "forge-std/Test.sol";
 
 import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -46,14 +46,19 @@ import {MockBalanceTracker} from "lib/euler-vault-kit/test/mocks/MockBalanceTrac
 import {TestERC20} from "lib/euler-vault-kit/test/mocks/TestERC20.sol";
 import {IRMTestDefault} from "lib/euler-vault-kit/test/mocks/IRMTestDefault.sol";
 
-import {UniswapV4WrapperFactory} from "src/uniswap/factory/UniswapV4WrapperFactory.sol";
 import {UniswapV4Wrapper} from "src/uniswap/UniswapV4Wrapper.sol";
 import {UniswapMintPositionHelper} from "src/uniswap/periphery/UniswapMintPositionHelper.sol";
+
+import {IUniswapV3Factory} from "lib/v4-periphery/lib/v4-core/test/utils/V3Helper.sol";
+import {IUniswapV3Pool} from "lib/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import {INonfungiblePositionManager} from "lib/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {WETH} from "lib/euler-price-oracle/lib/solady/src/tokens/WETH.sol";
 
 import {MockUniswapV4Wrapper} from "test/helpers/MockUniswapV4Wrapper.sol";
+import {MockUniswapV3Wrapper} from "test/helpers/MockUniswapV3Wrapper.sol";
+import {Create2} from "lib/openzeppelin-contracts/contracts/utils/Create2.sol";
 
 contract MockReturnsWETH9 {
     address public immutable weth;
@@ -72,7 +77,12 @@ contract BaseSetup is Test, Fuzzers {
 
     PoolManager public poolManager;
     PositionManager public positionManager;
-    UniswapV4WrapperFactory public uniswapV4WrapperFactory;
+
+    IUniswapV3Factory public v3Factory;
+    INonfungiblePositionManager public nonFungiblePositionManager;
+    IUniswapV3Pool public v3Pool;
+    MockUniswapV3Wrapper public uniswapV3Wrapper;
+
     EthereumVaultConnector public evc;
     GenericFactory public genericFactory;
     EVault public eulerVaultImplementation;
@@ -122,10 +132,23 @@ contract BaseSetup is Test, Fuzzers {
             poolManager, IAllowanceTransfer(address(0)), 0, IPositionDescriptor(address(0)), IWETH9(address(weth))
         );
 
+        address deployedAddr;
+        bytes memory bytecode = vm.readFileBinary("lib/v4-periphery/lib/v4-core/test/bin/v3Factory.bytecode");
+        assembly {
+            deployedAddr := create(0, add(bytecode, 0x20), mload(bytecode))
+        }
+        v3Factory = IUniswapV3Factory(deployedAddr);
+
+        //NonFungiblePositionManager.bytecode was created by converting the hex bytecode from NonFungiblePositionsManager artifact to binary file format
+        bytecode = vm.readFileBinary("test/bin/NonfungiblePositionManager.bytecode");
+        //expected constructor args: address _factory, address _WETH9, address _NFTDescriptor
+        bytecode = abi.encodePacked(bytecode, abi.encode(address(v3Factory), address(weth), address(0)));
+        assembly {
+            deployedAddr := create(0, add(bytecode, 0x20), mload(bytecode))
+        }
+        nonFungiblePositionManager = INonfungiblePositionManager(deployedAddr);
+
         evc = new EthereumVaultConnector();
-
-        uniswapV4WrapperFactory = new UniswapV4WrapperFactory(address(evc), address(positionManager), address(weth));
-
         genericFactory = new GenericFactory(genericFactoryAdmin);
 
         oracle = new MockPriceOracle();
@@ -197,55 +220,28 @@ contract BaseSetup is Test, Fuzzers {
             address(evc), address(positionManager), address(oracle), unitOfAccount, poolKey, address(weth)
         );
 
-        address uniswapV4WrapperAddress = address(uniswapV4Wrapper);
+        v3Pool = IUniswapV3Pool(v3Factory.createPool(address(tokenA), address(tokenB), fee));
+        uniswapV3Wrapper = new MockUniswapV3Wrapper(
+            address(evc), address(nonFungiblePositionManager), address(oracle), unitOfAccount, address(v3Pool)
+        );
 
-        oracle.setPrice(uniswapV4WrapperAddress, unitOfAccount, 1e18); // Set initial price to 1:1
         oracle.setPrice(address(tokenA), unitOfAccount, 1e18); // Set initial price to 1:1
         oracle.setPrice(address(tokenB), unitOfAccount, 1e18); // Set initial price to 1:1
 
+        oracle.setPrice(address(uniswapV4Wrapper), unitOfAccount, 1e18); // Set initial price to 1:1
+        oracle.setPrice(address(uniswapV3Wrapper), unitOfAccount, 1e18); // Set initial price to 1:1
+
         //accept the uniswapV4Wrapper a collateral in both eTokenAVault and eTokenBVault
-        eTokenAVault.setLTV(uniswapV4WrapperAddress, 0.9e4, 0.9e4, 0); // 90% LTV
-        eTokenBVault.setLTV(uniswapV4WrapperAddress, 0.9e4, 0.9e4, 0); // 90% LTV
+        eTokenAVault.setLTV(address(uniswapV4Wrapper), 0.9e4, 0.9e4, 0); // 90% LTV
+        eTokenBVault.setLTV(address(uniswapV4Wrapper), 0.9e4, 0.9e4, 0); // 90% LTV
+
+        //accept the uniswapV3Wrapper a collateral in both eTokenAVault and eTokenBVault
+        eTokenAVault.setLTV(address(uniswapV3Wrapper), 0.9e4, 0.9e4, 0); // 90% LTV
+        eTokenBVault.setLTV(address(uniswapV3Wrapper), 0.9e4, 0.9e4, 0); // 90% LTV
 
         mintPositionHelper = new UniswapMintPositionHelper(
             address(evc), address(new MockReturnsWETH9(address(weth))), address(positionManager)
         );
-    }
-
-    function createFuzzyLiquidityParams(LiquidityParams memory params, int24 tickSpacing_, uint160 sqrtPriceX96)
-        internal
-        view
-        returns (LiquidityParams memory)
-    {
-        (params.tickLower, params.tickUpper) = boundTicks(params.tickLower, params.tickUpper, tickSpacing_);
-        int256 liquidityDeltaFromAmounts =
-            getLiquidityDeltaFromAmounts(params.tickLower, params.tickUpper, sqrtPriceX96);
-
-        int256 liquidityMaxPerTick = int256(uint256(Pool.tickSpacingToMaxLiquidityPerTick(tickSpacing_)));
-
-        int256 liquidityMax =
-            liquidityDeltaFromAmounts > liquidityMaxPerTick ? liquidityMaxPerTick : liquidityDeltaFromAmounts;
-
-        //We read the current liquidity for the tickLower and tickUpper and make sure the resulting liquidity does not exceed the max liquidity per tick
-
-        (uint128 liquidityGrossTickLower,,,) = poolManager.getTickInfo(poolId, params.tickLower);
-        (uint128 liquidityGrossTickUpper,,,) = poolManager.getTickInfo(poolId, params.tickUpper);
-
-        uint128 liquidityGrossTickLowerAfter = liquidityGrossTickLower + uint128(uint256(liquidityMax));
-
-        if (liquidityGrossTickLowerAfter > uint128(uint256(liquidityMaxPerTick))) {
-            liquidityMax = int256(uint256(liquidityMaxPerTick) - uint256(liquidityGrossTickLower));
-        }
-        uint128 liquidityGrossTickUpperAfter = liquidityGrossTickUpper + uint128(uint256(liquidityMax));
-
-        if (liquidityGrossTickUpperAfter > uint128(uint256(liquidityMaxPerTick))) {
-            liquidityMax = int256(uint256(liquidityMaxPerTick) - uint256(liquidityGrossTickUpper));
-        }
-
-        _vm.assume(liquidityMax != 0);
-        params.liquidityDelta = bound(liquidityDeltaFromAmounts, 1, liquidityMax);
-
-        return params;
     }
 
     //mint a new position
@@ -308,13 +304,96 @@ contract BaseSetup is Test, Fuzzers {
         amount1 = token1BalanceBefore - targetPoolKey.currency1.balanceOf(owner);
     }
 
-    function boundLiquidityParamsAndMint(address actor, LiquidityParams memory params)
+    function mintPositionV3(
+        int24 tickLower,
+        int24 tickUpper,
+        uint256 amount0Desired,
+        uint256 amount1Desired,
+        uint256 liquidityToAdd,
+        address owner
+    ) internal returns (uint256 tokenIdMinted, uint256 amount0, uint256 amount1) {
+        deal(address(tokenA), owner, amount0Desired * 2 + 1);
+        deal(address(tokenB), owner, amount1Desired * 2 + 1);
+
+        startHoax(owner);
+        tokenA.approve(address(mintPositionHelper), amount0Desired * 2 + 1);
+        tokenB.approve(address(mintPositionHelper), amount1Desired * 2 + 1);
+
+        (tokenIdMinted,, amount0, amount1) = mintPositionHelper.mintPosition(
+            INonfungiblePositionManager.MintParams({
+                token0: address(tokenA),
+                token1: address(tokenB),
+                fee: fee,
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                amount0Desired: amount0Desired,
+                amount1Desired: amount1Desired,
+                amount0Min: 0,
+                amount1Min: 0,
+                recipient: owner,
+                deadline: block.timestamp
+            })
+        );
+    }
+
+    function getLiquidityGross(bool isV3, int24 tick) internal view returns (uint128 liquidityGross) {
+        if (isV3) {
+            (liquidityGross,,,,,,,) = v3Pool.ticks(tick);
+        } else {
+            (liquidityGross,,,) = poolManager.getTickInfo(poolId, tick);
+        }
+    }
+
+    function createFuzzyLiquidityParams(
+        LiquidityParams memory params,
+        bool isV3,
+        int24 tickSpacing_,
+        uint160 sqrtPriceX96
+    ) internal view returns (LiquidityParams memory) {
+        (params.tickLower, params.tickUpper) = boundTicks(params.tickLower, params.tickUpper, tickSpacing_);
+        int256 liquidityDeltaFromAmounts =
+            getLiquidityDeltaFromAmounts(params.tickLower, params.tickUpper, sqrtPriceX96);
+
+        int256 liquidityMaxPerTick = int256(uint256(Pool.tickSpacingToMaxLiquidityPerTick(tickSpacing_)));
+
+        int256 liquidityMax =
+            liquidityDeltaFromAmounts > liquidityMaxPerTick ? liquidityMaxPerTick : liquidityDeltaFromAmounts;
+
+        //We read the current liquidity for the tickLower and tickUpper and make sure the resulting liquidity does not exceed the max liquidity per tick
+        uint128 liquidityGrossTickLower = getLiquidityGross(isV3, params.tickLower);
+        uint128 liquidityGrossTickUpper = getLiquidityGross(isV3, params.tickUpper);
+
+        uint128 liquidityGrossTickLowerAfter = liquidityGrossTickLower + uint128(uint256(liquidityMax));
+
+        if (liquidityGrossTickLowerAfter > uint128(uint256(liquidityMaxPerTick))) {
+            liquidityMax = int256(uint256(liquidityMaxPerTick) - uint256(liquidityGrossTickLower));
+        }
+        uint128 liquidityGrossTickUpperAfter = liquidityGrossTickUpper + uint128(uint256(liquidityMax));
+
+        if (liquidityGrossTickUpperAfter > uint128(uint256(liquidityMaxPerTick))) {
+            liquidityMax = int256(uint256(liquidityMaxPerTick) - uint256(liquidityGrossTickUpper));
+        }
+
+        _vm.assume(liquidityMax != 0);
+        params.liquidityDelta = bound(liquidityDeltaFromAmounts, 1, liquidityMax);
+
+        return params;
+    }
+
+    function boundLiquidityParamsAndMint(address actor, LiquidityParams memory params, bool isV3)
         internal
         returns (uint256 tokenIdMinted, uint256 amount0Spent, uint256 amount1Spent)
     {
         params.liquidityDelta = bound(params.liquidityDelta, 1, 10_000e18);
-        (uint160 sqrtRatioX96,,,) = poolManager.getSlot0(poolId);
-        params = createFuzzyLiquidityParams(params, poolKey.tickSpacing, sqrtRatioX96);
+
+        uint160 sqrtRatioX96;
+        if (isV3) {
+            (sqrtRatioX96,,,,,,) = v3Pool.slot0();
+        } else {
+            (sqrtRatioX96,,,) = poolManager.getSlot0(poolId);
+        }
+
+        params = createFuzzyLiquidityParams(params, isV3, poolKey.tickSpacing, sqrtRatioX96);
 
         (uint256 estimatedAmount0Required, uint256 estimatedAmount1Required) = LiquidityAmounts.getAmountsForLiquidity(
             sqrtRatioX96,
@@ -325,14 +404,25 @@ contract BaseSetup is Test, Fuzzers {
 
         startHoax(actor);
 
-        (tokenIdMinted, amount0Spent, amount1Spent) = mintPosition(
-            poolKey,
-            params.tickLower,
-            params.tickUpper,
-            estimatedAmount0Required,
-            estimatedAmount1Required,
-            uint256(params.liquidityDelta),
-            actor
-        );
+        if (isV3) {
+            (tokenIdMinted, amount0Spent, amount1Spent) = mintPositionV3(
+                params.tickLower,
+                params.tickUpper,
+                estimatedAmount0Required,
+                estimatedAmount1Required,
+                uint256(params.liquidityDelta),
+                actor
+            );
+        } else {
+            (tokenIdMinted, amount0Spent, amount1Spent) = mintPosition(
+                poolKey,
+                params.tickLower,
+                params.tickUpper,
+                estimatedAmount0Required,
+                estimatedAmount1Required,
+                uint256(params.liquidityDelta),
+                actor
+            );
+        }
     }
 }

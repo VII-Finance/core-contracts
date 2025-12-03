@@ -267,7 +267,7 @@ contract Handler is Test, BaseSetup {
         tokenIdInfo[tokenId].holders.add(to);
     }
 
-    function partialUnwrap(uint256 actorIndexSeed, bool isV3,uint256 tokenIdIndexSeed, uint256 unwrapAmount)
+    function partialUnwrap(uint256 actorIndexSeed, bool isV3, uint256 tokenIdIndexSeed, uint256 unwrapAmount)
         public
         useActor(actorIndexSeed)
         useUniswapWrapper(false)
@@ -322,7 +322,7 @@ contract Handler is Test, BaseSetup {
         );
     }
 
-    function enableTokenIdAsCollateral(uint256 actorIndexSeed,bool isV3, uint256 tokenIdIndexSeed)
+    function enableTokenIdAsCollateral(uint256 actorIndexSeed, bool isV3, uint256 tokenIdIndexSeed)
         public
         useActor(actorIndexSeed)
         useUniswapWrapper(false)
@@ -404,11 +404,12 @@ contract Handler is Test, BaseSetup {
         );
     }
 
-    function transferWithoutActiveLiquidation(uint256 actorIndexSeed, bool isV3, uint256 toIndexSeed, uint256 transferAmount)
-        public
-        useActor(actorIndexSeed)
-        useUniswapWrapper(false)
-    {
+    function transferWithoutActiveLiquidation(
+        uint256 actorIndexSeed,
+        bool isV3,
+        uint256 toIndexSeed,
+        uint256 transferAmount
+    ) public useActor(actorIndexSeed) useUniswapWrapper(false) {
         address to = actors[bound(toIndexSeed, 0, actors.length - 1)];
 
         uint256 fromBalanceBeforeTransfer = uniswapWrapper.balanceOf(currentActor);
@@ -548,7 +549,7 @@ contract Handler is Test, BaseSetup {
         borrowUpToMax(currentActor, eTokenAVault, borrowAmount);
     }
 
-    function borrowTokenB(uint256 actorIndexSeed, bool isV3,uint256 borrowAmount)
+    function borrowTokenB(uint256 actorIndexSeed, bool isV3, uint256 borrowAmount)
         public
         useActor(actorIndexSeed)
         useUniswapWrapper(false)

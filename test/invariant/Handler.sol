@@ -363,6 +363,7 @@ contract Handler is Test, BaseSetup {
     function disableTokenIdAsCollateral(uint256 actorIndexSeed, bool isV3, uint256 tokenIdIndexSeed)
         public
         useActor(actorIndexSeed)
+        useUniswapWrapper(false)
     {
         uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor);
         if (tokenIds.length == 0) {
@@ -526,7 +527,7 @@ contract Handler is Test, BaseSetup {
     }
 
     function getMaxBorrowAmount(address account, IEVault vault) internal view returns (uint256 maxBorrowAmount) {
-        uint256 remainingCollateralValue = uniswapWrapper.balanceOf(account);
+        uint256 remainingCollateralValue = uniswapV3Wrapper.balanceOf(account) + uniswapV4Wrapper.balanceOf(account);
 
         //if user has already borrowed from this vault, we deduct the liability from the collateral value
         if (vault.debtOf(account) != 0) {

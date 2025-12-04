@@ -77,30 +77,71 @@ contract MockUniswapV3Wrapper is UniswapV3Wrapper {
         totalPendingFees1 = feesOwed1 + tokensOwed1;
     }
 
+    struct Local {
+        int24 tickLower;
+        int24 tickUpper;
+        uint128 liquidity;
+        uint256 feeGrowthInside0LastX128;
+        uint256 feeGrowthInside1LastX128;
+        uint128 tokensOwed0;
+        uint128 tokensOwed1;
+        uint160 sqrtRatioX96;
+        uint256 feeGrowthInside0X128;
+        uint256 feeGrowthInside1X128;
+    }
+
     function calculateExactedValueOfTokenIdAfterUnwrap(
         uint256 tokenId,
         uint256 unwrapAmount,
         uint256 balanceBeforeUnwrap
     ) public view returns (uint256) {
-        (,,,,,,, uint128 liquidity,,,,) = INonfungiblePositionManager(address(underlying)).positions(tokenId);
-        uint128 liquidityToRemove = proportionalShare(liquidity, unwrapAmount, totalSupply(tokenId)).toUint128();
+        uint256 totalAmountInUnitOfAccount;
+        {
+            Local memory local;
+            (
+                ,,,,,
+                local.tickLower,
+                local.tickUpper,
+                local.liquidity,
+                local.feeGrowthInside0LastX128,
+                local.feeGrowthInside1LastX128,
+                local.tokensOwed0,
+                local.tokensOwed1
+            ) = INonfungiblePositionManager(address(underlying)).positions(tokenId);
 
-        liquidity -= liquidityToRemove;
+            uint128 liquidityToRemove =
+                proportionalShare(local.liquidity, unwrapAmount, totalSupply(tokenId)).toUint128();
 
-        (uint160 sqrtRatioX96,,,,,,) = pool.slot0();
-        (uint256 amount0, uint256 amount1) = _totalPositionValue(sqrtRatioX96, tokenId);
+            local.liquidity -= liquidityToRemove;
 
-        uint256 amount0InUnitOfAccount = getQuote(amount0, token0);
-        uint256 amount1InUnitOfAccount = getQuote(amount1, token1);
+            (local.sqrtRatioX96,,,,,,) = pool.slot0();
+
+            (uint256 amount0Principal, uint256 amount1Principal) = UniswapPositionValueHelper.principal(
+                local.sqrtRatioX96, local.tickLower, local.tickUpper, local.liquidity
+            );
+
+            (local.feeGrowthInside0X128, local.feeGrowthInside1X128) =
+                _getFeeGrowthInside(local.tickLower, local.tickUpper);
+
+            //fees that are not accounted for yet
+            (uint256 feesOwed0, uint256 feesOwed1) = UniswapPositionValueHelper.feesOwed(
+                local.feeGrowthInside0X128,
+                local.feeGrowthInside1X128,
+                local.feeGrowthInside0LastX128,
+                local.feeGrowthInside1LastX128,
+                local.liquidity
+            );
+
+            totalAmountInUnitOfAccount = getQuote(amount0Principal + feesOwed0 + local.tokensOwed0, token0)
+                + getQuote(amount1Principal + feesOwed1 + local.tokensOwed1, token1);
+        }
 
         //avoid division by zero
         if (totalSupply(tokenId) == unwrapAmount) {
             return 0;
         }
         return proportionalShare(
-            amount0InUnitOfAccount + amount1InUnitOfAccount,
-            balanceBeforeUnwrap - unwrapAmount,
-            totalSupply(tokenId) - unwrapAmount
+            totalAmountInUnitOfAccount, balanceBeforeUnwrap - unwrapAmount, totalSupply(tokenId) - unwrapAmount
         );
     }
 

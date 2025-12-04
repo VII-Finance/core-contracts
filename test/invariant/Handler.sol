@@ -42,6 +42,7 @@ import {BaseSetup} from "test/invariant/BaseSetup.sol";
 import {EnumerableSet} from "lib/openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
 import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {IMockUniswapWrapper} from "test/helpers/IMockUniswapWrapper.sol";
+import {UniswapPositionValueHelper} from "src/libraries/UniswapPositionValueHelper.sol";
 import {console} from "forge-std/console.sol";
 
 struct TokenIdInfo {
@@ -54,10 +55,10 @@ contract Handler is Test, BaseSetup {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    EnumerableSet.UintSet internal allTokenIds;
+    mapping(bool isV3 => EnumerableSet.UintSet) internal allTokenIds;
 
-    mapping(address => EnumerableSet.UintSet tokenIds) internal tokenIdsHeldByActor;
-    mapping(uint256 tokenId => TokenIdInfo) internal tokenIdInfo;
+    mapping(address => mapping(bool isV3 => EnumerableSet.UintSet)) internal tokenIdsHeldByActor;
+    mapping(uint256 tokenId => mapping(bool isV3 => TokenIdInfo)) internal tokenIdInfo;
 
     address[] public actors;
 
@@ -92,24 +93,24 @@ contract Handler is Test, BaseSetup {
         return actors.length;
     }
 
-    function getTokenIdsHeldByActor(address actor) public view returns (uint256[] memory tokenId) {
-        return tokenIdsHeldByActor[actor].values();
+    function getTokenIdsHeldByActor(address actor, bool isV3) public view returns (uint256[] memory tokenId) {
+        return tokenIdsHeldByActor[actor][isV3].values();
     }
 
-    function isTokenIdWrapped(uint256 tokenId) public view returns (bool isWrapped) {
-        return tokenIdInfo[tokenId].isWrapped;
+    function isTokenIdWrapped(uint256 tokenId, bool isV3) public view returns (bool isWrapped) {
+        return tokenIdInfo[tokenId][isV3].isWrapped;
     }
 
-    function getUsersHoldingWrappedTokenId(uint256 tokenId) public view returns (address[] memory users) {
-        return tokenIdInfo[tokenId].holders.values();
+    function getUsersHoldingWrappedTokenId(uint256 tokenId, bool isV3) public view returns (address[] memory users) {
+        return tokenIdInfo[tokenId][isV3].holders.values();
     }
 
-    function getAllTokenIdsLength() public view returns (uint256) {
-        return allTokenIds.length();
+    function getAllTokenIdsLength(bool isV3) public view returns (uint256) {
+        return allTokenIds[isV3].length();
     }
 
-    function getAllTokenIds() public view returns (uint256[] memory) {
-        return allTokenIds.values();
+    function getAllTokenIds(bool isV3) public view returns (uint256[] memory) {
+        return allTokenIds[isV3].values();
     }
 
     function mintPositionAndWrap(uint256 actorIndexSeed, bool isV3, LiquidityParams memory params)
@@ -129,10 +130,10 @@ contract Handler is Test, BaseSetup {
         uniswapWrapper.wrap(tokenIdMinted, receiver);
 
         //push the tokenId to the mapping
-        tokenIdsHeldByActor[receiver].add(tokenIdMinted);
-        tokenIdInfo[tokenIdMinted].isWrapped = true;
-        allTokenIds.add(tokenIdMinted);
-        tokenIdInfo[tokenIdMinted].holders.add(receiver);
+        tokenIdsHeldByActor[receiver][isV3].add(tokenIdMinted);
+        tokenIdInfo[tokenIdMinted][isV3].isWrapped = true;
+        allTokenIds[isV3].add(tokenIdMinted);
+        tokenIdInfo[tokenIdMinted][isV3].holders.add(receiver);
 
         assertEq(
             uniswapWrapper.balanceOf(receiver),
@@ -195,7 +196,7 @@ contract Handler is Test, BaseSetup {
         uint256 tokenIdIndexSeed,
         uint256 transferAmount
     ) public useActor(actorIndexSeed) useUniswapWrapper(isV3) {
-        uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor);
+        uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor, isV3);
         if (tokenIds.length == 0) {
             return; //skip if current actor has no tokenIds
         }
@@ -211,28 +212,32 @@ contract Handler is Test, BaseSetup {
 
         transferAmount = bound(transferAmount, 0, fromBalanceBeforeTransfer);
 
-        uint256 tokenIdValueBeforeTransfer = uniswapWrapper.calculateValueOfTokenId(tokenId, fromBalanceBeforeTransfer);
+        {
+            uint256 tokenIdValueBeforeTransfer =
+                uniswapWrapper.calculateValueOfTokenId(tokenId, fromBalanceBeforeTransfer);
 
-        uint256 expectTokenIdValueAfterTransfer =
-            uniswapWrapper.calculateValueOfTokenId(tokenId, fromBalanceBeforeTransfer - transferAmount);
+            uint256 expectTokenIdValueAfterTransfer =
+                uniswapWrapper.calculateValueOfTokenId(tokenId, fromBalanceBeforeTransfer - transferAmount);
 
-        //get the value of the tokenId
-        uint256 tokenIdValueToTransfer = tokenIdValueBeforeTransfer - expectTokenIdValueAfterTransfer; //We are not calculating the amount directly to avoid miscalculation due to rounding error
+            //get the value of the tokenId
+            uint256 tokenIdValueToTransfer = tokenIdValueBeforeTransfer - expectTokenIdValueAfterTransfer; //We are not calculating the amount directly to avoid miscalculation due to rounding error
 
-        //if this tokenId is not enabled as collateral then the value being transferred is 0
-        if (!tokenIdInfo[tokenId].isEnabled[currentActor]) {
-            tokenIdValueToTransfer = 0;
+            //if this tokenId is not enabled as collateral then the value being transferred is 0
+            if (!tokenIdInfo[tokenId][isV3].isEnabled[currentActor]) {
+                tokenIdValueToTransfer = 0;
+            }
+
+            bool shouldTransferFail =
+                shouldNextActionFail(currentActor, tokenIdValueToTransfer, address(uniswapWrapper));
+
+            if (shouldTransferFail && to != currentActor) {
+                vm.expectRevert();
+            }
+
+            uniswapWrapper.transfer(to, tokenId, transferAmount);
+
+            if (shouldTransferFail) return; //if the transfer should fail, we can skip the rest of the assertions
         }
-
-        bool shouldTransferFail = shouldNextActionFail(currentActor, tokenIdValueToTransfer, address(uniswapWrapper));
-
-        if (shouldTransferFail && to != currentActor) {
-            vm.expectRevert();
-        }
-
-        uniswapWrapper.transfer(to, tokenId, transferAmount);
-
-        if (shouldTransferFail) return; //if the transfer should fail, we can skip the rest of the assertions
         //if transfer to self then we make sure the balance does not change
         if (to == currentActor) {
             assertEq(
@@ -254,17 +259,46 @@ contract Handler is Test, BaseSetup {
         );
 
         if (transferAmount == fromBalanceBeforeTransfer) {
-            tokenIdsHeldByActor[currentActor].remove(tokenId);
-            tokenIdInfo[tokenId].holders.remove(currentActor);
+            tokenIdsHeldByActor[currentActor][isV3].remove(tokenId);
+            tokenIdInfo[tokenId][isV3].holders.remove(currentActor);
         } else {
             //if the transfer amount is less than the full balance, we should not remove the tokenId from the mapping
             //but we should still add the receiver to the holders
-            if (!tokenIdInfo[tokenId].holders.contains(to)) {
-                tokenIdInfo[tokenId].holders.add(to);
+            if (!tokenIdInfo[tokenId][isV3].holders.contains(to)) {
+                tokenIdInfo[tokenId][isV3].holders.add(to);
             }
         }
-        tokenIdsHeldByActor[to].add(tokenId);
-        tokenIdInfo[tokenId].holders.add(to);
+        tokenIdsHeldByActor[to][isV3].add(tokenId);
+        tokenIdInfo[tokenId][isV3].holders.add(to);
+    }
+
+    //given unwrap amount, the UniswapV3Wrapper will calculate the liquidity to be removed
+    //if the liquidity to be removed is zero, call to the UniswapV3Pool will fails
+    //even if liquidity to be removed is non-zero, it may still result in amount0 and amount1 being zero
+    //which will make the collect call fail as well
+    function isZeroLiquidityDecreased(uint256 tokenId, uint256 unwrapAmount, bool isV3) internal view returns (bool) {
+        if (!isV3) return false;
+
+        // in NonFungiblePositionManager, decrease liquidity fails if liquidity being removed is zero
+        if (unwrapAmount == 0) {
+            return true;
+        }
+
+        (,,,,, int24 tickLower, int24 tickUpper, uint128 liquidity,,,,) = nonFungiblePositionManager.positions(tokenId);
+        uint128 liquidityToRemove =
+            uint128(uniswapWrapper.proportionalShare(liquidity, unwrapAmount, uniswapWrapper.totalSupply(tokenId)));
+
+        if (liquidityToRemove == 0) {
+            return true;
+        }
+
+        // also make sure amount0 and amount1 resulting from liquidityToRemove is not zero either
+        // call to collect it will fail otherwise
+        (uint160 sqrtRatioX96,,,,,,) = uniswapV3Wrapper.pool().slot0();
+        (uint256 amount0, uint256 amount1) =
+            UniswapPositionValueHelper.principal(sqrtRatioX96, tickLower, tickUpper, liquidityToRemove);
+
+        return (amount0 == 0 && amount1 == 0);
     }
 
     function partialUnwrap(uint256 actorIndexSeed, bool isV3, uint256 tokenIdIndexSeed, uint256 unwrapAmount)
@@ -272,7 +306,7 @@ contract Handler is Test, BaseSetup {
         useActor(actorIndexSeed)
         useUniswapWrapper(isV3)
     {
-        uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor);
+        uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor, isV3);
         if (tokenIds.length == 0) {
             return; //skip if current actor has no tokenIds
         }
@@ -286,33 +320,36 @@ contract Handler is Test, BaseSetup {
 
         unwrapAmount = bound(unwrapAmount, 0, balanceBeforeUnwrap);
 
-        uint256 tokenIdValueBeforeUnwrap = uniswapWrapper.calculateValueOfTokenId(tokenId, balanceBeforeUnwrap);
+        {
+            uint256 tokenIdValueBeforeUnwrap = uniswapWrapper.calculateValueOfTokenId(tokenId, balanceBeforeUnwrap);
 
-        uint256 expectTokenIdValueAfterUnwrap =
-            uniswapWrapper.calculateExactedValueOfTokenIdAfterUnwrap(tokenId, unwrapAmount, balanceBeforeUnwrap);
+            uint256 expectTokenIdValueAfterUnwrap =
+                uniswapWrapper.calculateExactedValueOfTokenIdAfterUnwrap(tokenId, unwrapAmount, balanceBeforeUnwrap);
 
-        //get the value of the tokenId
-        uint256 tokenIdValueToTransfer = tokenIdValueBeforeUnwrap - expectTokenIdValueAfterUnwrap; //We are not calculating the amount directly to avoid miscalculation due to rounding error
+            //get the value of the tokenId
+            uint256 tokenIdValueToTransfer = tokenIdValueBeforeUnwrap - expectTokenIdValueAfterUnwrap; //We are not calculating the amount directly to avoid miscalculation due to rounding error
 
-        //if this tokenId is not enabled as collateral then the value being transferred is 0
-        if (!tokenIdInfo[tokenId].isEnabled[currentActor]) {
-            tokenIdValueToTransfer = 0;
+            //if this tokenId is not enabled as collateral then the value being transferred is 0
+            if (!tokenIdInfo[tokenId][isV3].isEnabled[currentActor]) {
+                tokenIdValueToTransfer = 0;
+            }
+
+            bool shouldUnwrapFail = shouldNextActionFail(currentActor, tokenIdValueToTransfer, address(uniswapWrapper))
+                || isZeroLiquidityDecreased(tokenId, unwrapAmount, isV3);
+
+            if (shouldUnwrapFail) {
+                vm.expectRevert();
+            }
+
+            uniswapWrapper.unwrap(currentActor, tokenId, currentActor, unwrapAmount, "");
+
+            if (shouldUnwrapFail) return; //if the unwrap should fail, we can skip the rest of the assertions
         }
-
-        bool shouldUnwrapFail = shouldNextActionFail(currentActor, tokenIdValueToTransfer, address(uniswapWrapper));
-
-        if (shouldUnwrapFail) {
-            vm.expectRevert();
-        }
-
-        uniswapWrapper.unwrap(currentActor, tokenId, currentActor, unwrapAmount, "");
-
-        if (shouldUnwrapFail) return; //if the unwrap should fail, we can skip the rest of the assertions
 
         //We need to independently find out the amount user spent on the tokenId
         if (unwrapAmount == balanceBeforeUnwrap) {
-            tokenIdsHeldByActor[currentActor].remove(tokenId);
-            tokenIdInfo[tokenId].holders.remove(currentActor);
+            tokenIdsHeldByActor[currentActor][isV3].remove(tokenId);
+            tokenIdInfo[tokenId][isV3].holders.remove(currentActor);
         }
 
         assertEq(
@@ -327,18 +364,18 @@ contract Handler is Test, BaseSetup {
         useActor(actorIndexSeed)
         useUniswapWrapper(isV3)
     {
-        uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor);
+        uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor, isV3);
         if (tokenIds.length == 0) {
             return; //skip if current actor has no tokenIds
         }
         uint256 tokenId = tokenIds[bound(tokenIdIndexSeed, 0, tokenIds.length - 1)];
 
         //if the tokenId is already enabled, we can skip
-        if (tokenIdInfo[tokenId].isEnabled[currentActor]) {
+        if (tokenIdInfo[tokenId][isV3].isEnabled[currentActor]) {
             return;
         }
 
-        tokenIdInfo[tokenId].isEnabled[currentActor] = true;
+        tokenIdInfo[tokenId][isV3].isEnabled[currentActor] = true;
 
         uint256 enabledTokenIdsLengthBefore = uniswapWrapper.totalTokenIdsEnabledBy(currentActor);
 
@@ -365,14 +402,14 @@ contract Handler is Test, BaseSetup {
         useActor(actorIndexSeed)
         useUniswapWrapper(isV3)
     {
-        uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor);
+        uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor, isV3);
         if (tokenIds.length == 0) {
             return; //skip if current actor has no tokenIds
         }
         uint256 tokenId = tokenIds[bound(tokenIdIndexSeed, 0, tokenIds.length - 1)];
 
         //if the tokenId is not enabled, we can skip
-        if (!tokenIdInfo[tokenId].isEnabled[currentActor]) {
+        if (!tokenIdInfo[tokenId][isV3].isEnabled[currentActor]) {
             return;
         }
         uint256 enabledTokenIdsLengthBefore = uniswapWrapper.totalTokenIdsEnabledBy(currentActor);
@@ -396,13 +433,20 @@ contract Handler is Test, BaseSetup {
 
         if (shouldDisableTokenIdFail) return; //if the disable should fail, we can skip the rest of the assertions
 
-        tokenIdInfo[tokenId].isEnabled[currentActor] = false;
+        tokenIdInfo[tokenId][isV3].isEnabled[currentActor] = false;
 
         assertEq(
             uniswapWrapper.totalTokenIdsEnabledBy(currentActor),
             enabledTokenIdsLengthBefore - 1,
             "uniswapWrapper: disableTokenIdAsCollateral should decrease total enabled tokenIds"
         );
+    }
+
+    struct LocalPrams {
+        uint256[] tokenIds;
+        uint256[] fromTokenIdBalancesBefore;
+        uint256[] toTokenIdBalancesBefore;
+        uint256[] transferAmounts;
     }
 
     function transferWithoutActiveLiquidation(
@@ -422,28 +466,32 @@ contract Handler is Test, BaseSetup {
         transferAmount = bound(transferAmount, 0, fromBalanceBeforeTransfer);
 
         //we get all of the enabled tokenIds of the current actor
-        uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor);
-        uint256[] memory fromTokenIdBalancesBefore = new uint256[](tokenIds.length);
-        uint256[] memory toTokenIdBalancesBefore = new uint256[](tokenIds.length);
-        uint256[] memory transferAmounts = new uint256[](tokenIds.length);
-        for (uint256 i = 0; i < tokenIds.length; i++) {
-            fromTokenIdBalancesBefore[i] = uniswapWrapper.balanceOf(currentActor, tokenIds[i]);
-            toTokenIdBalancesBefore[i] = uniswapWrapper.balanceOf(to, tokenIds[i]);
+        LocalPrams memory localParams;
+        localParams.tokenIds = getTokenIdsHeldByActor(currentActor, isV3);
+        localParams.fromTokenIdBalancesBefore = new uint256[](localParams.tokenIds.length);
+        localParams.toTokenIdBalancesBefore = new uint256[](localParams.tokenIds.length);
+        localParams.transferAmounts = new uint256[](localParams.tokenIds.length);
+        for (uint256 i = 0; i < localParams.tokenIds.length; i++) {
+            localParams.fromTokenIdBalancesBefore[i] = uniswapWrapper.balanceOf(currentActor, localParams.tokenIds[i]);
+            localParams.toTokenIdBalancesBefore[i] = uniswapWrapper.balanceOf(to, localParams.tokenIds[i]);
 
-            if (tokenIdInfo[tokenIds[i]].isEnabled[currentActor] && currentActor != to) {
+            if (tokenIdInfo[localParams.tokenIds[i]][isV3].isEnabled[currentActor] && currentActor != to) {
                 //if the tokenId is enabled, we should proportionally reduce the balance
-                transferAmounts[i] = Math.mulDiv(
-                    fromTokenIdBalancesBefore[i], transferAmount, fromBalanceBeforeTransfer, Math.Rounding.Ceil
+                localParams.transferAmounts[i] = Math.mulDiv(
+                    localParams.fromTokenIdBalancesBefore[i],
+                    transferAmount,
+                    fromBalanceBeforeTransfer,
+                    Math.Rounding.Ceil
                 );
                 vm.stopPrank();
                 //we also enable this tokenId for the receiver as well to make sure transfer in terms of unit of account is the same as well
                 vm.prank(to);
-                uniswapWrapper.enableTokenIdAsCollateral(tokenIds[i]);
+                uniswapWrapper.enableTokenIdAsCollateral(localParams.tokenIds[i]);
 
                 vm.startPrank(currentActor);
             } else {
                 //if the tokenId is not enabled, that tokenId transfer amount is 0
-                transferAmounts[i] = 0;
+                localParams.transferAmounts[i] = 0;
             }
         }
 
@@ -463,21 +511,21 @@ contract Handler is Test, BaseSetup {
                     "uniswapWrapper: transferWithoutActiveLiquidation should increase balance of receiver"
                 );
 
-                for (uint256 i = 0; i < tokenIds.length; i++) {
+                for (uint256 i = 0; i < localParams.tokenIds.length; i++) {
                     assertEq(
-                        uniswapWrapper.balanceOf(currentActor, tokenIds[i]),
-                        fromTokenIdBalancesBefore[i] - transferAmounts[i],
+                        uniswapWrapper.balanceOf(currentActor, localParams.tokenIds[i]),
+                        localParams.fromTokenIdBalancesBefore[i] - localParams.transferAmounts[i],
                         "uniswapWrapper: transferWithoutActiveLiquidation should proportionally reduce tokenId balances"
                     );
                     assertEq(
-                        uniswapWrapper.balanceOf(to, tokenIds[i]),
-                        toTokenIdBalancesBefore[i] + transferAmounts[i],
+                        uniswapWrapper.balanceOf(to, localParams.tokenIds[i]),
+                        localParams.toTokenIdBalancesBefore[i] + localParams.transferAmounts[i],
                         "uniswapWrapper: transferWithoutActiveLiquidation should proportionally increase tokenId balances"
                     );
 
-                    if (transferAmounts[i] > 0 && currentActor != to) {
-                        tokenIdsHeldByActor[to].add(tokenIds[i]);
-                        tokenIdInfo[tokenIds[i]].holders.add(to);
+                    if (localParams.transferAmounts[i] > 0 && currentActor != to) {
+                        tokenIdsHeldByActor[to][isV3].add(localParams.tokenIds[i]);
+                        tokenIdInfo[localParams.tokenIds[i]][isV3].holders.add(to);
                     }
                 }
             }
@@ -485,13 +533,13 @@ contract Handler is Test, BaseSetup {
             // If revert, do nothing (expected for some cases)
         }
 
-        for (uint256 i = 0; i < tokenIds.length; i++) {
+        for (uint256 i = 0; i < localParams.tokenIds.length; i++) {
             //we make the enabled tokenIds for the receiver to disabled to make sure no change really happened in the state
             //we only did this earlier to make sure the transfer in terms of unit of account is the same
-            if (!tokenIdInfo[tokenIds[i]].isEnabled[to]) {
+            if (!tokenIdInfo[localParams.tokenIds[i]][isV3].isEnabled[to]) {
                 vm.stopPrank();
                 vm.prank(to);
-                uniswapWrapper.disableTokenIdAsCollateral(tokenIds[i]);
+                uniswapWrapper.disableTokenIdAsCollateral(localParams.tokenIds[i]);
 
                 vm.startPrank(currentActor);
             }
@@ -513,7 +561,8 @@ contract Handler is Test, BaseSetup {
 
         if (enabledControllers.length == 0) {
             evc.enableController(account, address(vault));
-            evc.enableCollateral(account, address(uniswapWrapper));
+            evc.enableCollateral(account, address(uniswapV3Wrapper));
+            evc.enableCollateral(account, address(uniswapV4Wrapper));
             vault.borrow(borrowAmount, account);
             return borrowAmount;
         }
@@ -542,19 +591,11 @@ contract Handler is Test, BaseSetup {
         maxBorrowAmount = maxBorrowAmountInUOA * 1e18 / (oneTokenValueInUOA + 1); // add +1 to the price to make sure it's not the exact maxBorrowAmount. It fails if LTV is exactly equal to LTVBorrow as well
     }
 
-    function borrowTokenA(uint256 actorIndexSeed, bool isV3, uint256 borrowAmount)
-        public
-        useActor(actorIndexSeed)
-        useUniswapWrapper(isV3)
-    {
+    function borrowTokenA(uint256 actorIndexSeed, uint256 borrowAmount) public useActor(actorIndexSeed) {
         borrowUpToMax(currentActor, eTokenAVault, borrowAmount);
     }
 
-    function borrowTokenB(uint256 actorIndexSeed, bool isV3, uint256 borrowAmount)
-        public
-        useActor(actorIndexSeed)
-        useUniswapWrapper(isV3)
-    {
+    function borrowTokenB(uint256 actorIndexSeed, uint256 borrowAmount) public useActor(actorIndexSeed) {
         borrowUpToMax(currentActor, eTokenBVault, borrowAmount);
     }
 }

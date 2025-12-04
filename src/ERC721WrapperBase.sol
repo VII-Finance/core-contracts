@@ -14,7 +14,6 @@ import {IERC721WrapperBase} from "src/interfaces/IERC721WrapperBase.sol";
 import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {IERC20Metadata} from "lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeCast} from "lib/v4-periphery/lib/v4-core/src/libraries/SafeCast.sol";
-import {IEVault} from "lib/euler-interfaces/interfaces/IEVault.sol";
 
 abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721WrapperBase {
     uint256 public constant FULL_AMOUNT = 1e36;

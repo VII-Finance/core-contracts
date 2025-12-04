@@ -4,6 +4,7 @@ pragma solidity ^0.8.13;
 import {Test} from "forge-std/Test.sol";
 import {Handler, TokenIdInfo} from "test/invariant/Handler.sol";
 import {IEVault} from "lib/euler-vault-kit/src/EVault/IEVault.sol";
+import {IMockUniswapWrapper} from "test/helpers/IMockUniswapWrapper.sol";
 
 contract UniswapV4WrapperInvariants is Test {
     Handler public handler;
@@ -26,37 +27,52 @@ contract UniswapV4WrapperInvariants is Test {
         targetContract(address(handler));
     }
 
+    function getUniswapWrapper(bool isV3) internal view returns (IMockUniswapWrapper) {
+        return isV3
+            ? IMockUniswapWrapper(address(handler.uniswapV3Wrapper()))
+            : IMockUniswapWrapper(address(handler.uniswapV4Wrapper()));
+    }
+
     //make sure totalSupply of any tokenId is in uniswapV4Wrapper is not greater than FULL_AMOUNT
-    function invariant_totalSupplyNotGreaterThanFullAmount() public view {
+    function assertTotalSupplyNotGreaterThanFullAmount(bool isV3) public view {
         for (uint256 i = 0; i < handler.actorsLength(); i++) {
             address actor = handler.actors(i);
             //get all wrapped tokenIds
-            uint256[] memory tokenIds = handler.getTokenIdsHeldByActor(actor);
-
+            uint256[] memory tokenIds = handler.getTokenIdsHeldByActor(actor, isV3);
             for (uint256 j = 0; j < tokenIds.length; j++) {
                 uint256 tokenId = tokenIds[j];
-                bool isWrapped = handler.isTokenIdWrapped(tokenId);
+                bool isWrapped = handler.isTokenIdWrapped(tokenId, isV3);
                 if (!isWrapped) {
                     continue;
                 }
-                assertLe(handler.uniswapV4Wrapper().totalSupply(tokenId), handler.uniswapV4Wrapper().FULL_AMOUNT());
+                assertLe(getUniswapWrapper(isV3).totalSupply(tokenId), getUniswapWrapper(isV3).FULL_AMOUNT());
             }
         }
     }
 
-    function invariant_total6909SupplyEqualsSumOfBalances() public view {
-        uint256[] memory allTokenIds = handler.getAllTokenIds();
+    function invariant_totalSupplyNotGreaterThanFullAmount() public view {
+        assertTotalSupplyNotGreaterThanFullAmount(true);
+        assertTotalSupplyNotGreaterThanFullAmount(false);
+    }
+
+    function assertTotal6909SupplyEqualsSumOfBalances(bool isV3) public view {
+        uint256[] memory allTokenIds = handler.getAllTokenIds(isV3);
         for (uint256 i = 0; i < allTokenIds.length; i++) {
             uint256 tokenId = allTokenIds[i];
-            address[] memory users = handler.getUsersHoldingWrappedTokenId(tokenId);
+            address[] memory users = handler.getUsersHoldingWrappedTokenId(tokenId, isV3);
             uint256 totalBalance;
             for (uint256 j = 0; j < users.length; j++) {
                 address user = users[j];
-                totalBalance += handler.uniswapV4Wrapper().balanceOf(user, tokenId);
+                totalBalance += getUniswapWrapper(isV3).balanceOf(user, tokenId);
             }
-            uint256 total6909Supply = handler.uniswapV4Wrapper().totalSupply(tokenId);
+            uint256 total6909Supply = getUniswapWrapper(isV3).totalSupply(tokenId);
             assertEq(totalBalance, total6909Supply, "Total 6909 supply does not equal sum of balances");
         }
+    }
+
+    function invariant_total6909SupplyEqualsSumOfBalances() public view {
+        assertTotal6909SupplyEqualsSumOfBalances(true);
+        assertTotal6909SupplyEqualsSumOfBalances(false);
     }
 
     function invariant_liquidity() public view {

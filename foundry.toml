@@ -8,7 +8,7 @@ solc = "0.8.26"
 evm_version = "cancun"
 bytecode_hash = "none"
 cbor_metadata = false
-
+fs_permissions = [{access = "read", path = "./lib/v4-periphery/lib/v4-core/test/bin/v3Factory.bytecode"}, {access = "read", path = "./test/bin/nonFungiblePositionManager.bytecode"}]
 
 [fuzz]
 runs = 10

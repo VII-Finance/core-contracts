@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {IERC721WrapperBase} from "src/interfaces/IERC721WrapperBase.sol";
-import {IERC6909TokenSupply} from "lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6909.sol";
+import {IERC6909TokenSupply} from "lib/openzeppelin-contracts/contracts/interfaces/IERC6909.sol";
 
 interface IMockUniswapWrapper is IERC721WrapperBase, IERC6909TokenSupply {
     function syncFeesOwned(uint256 tokenId) external returns (uint256 actualFees0, uint256 actualFees1);

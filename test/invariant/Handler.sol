@@ -66,6 +66,11 @@ contract Handler is Test, BaseSetup {
 
     IMockUniswapWrapper internal uniswapWrapper;
 
+    //If this is false than turn on the fail on revert flag in foundry.toml as well
+    //Turning this flag to false would mean that the fuzzer will be able to do it's more without a lot of restrictions
+    //If it is true, then the fuzzer will be more constrained but the invariant tests will also work as "fuzz" tests
+    bool internal constant FAIL_ON_REVERT = true;
+
     modifier useActor(uint256 actorIndexSeed) {
         currentActor = actors[bound(actorIndexSeed, 0, actors.length - 1)];
         vm.startPrank(currentActor);
@@ -230,7 +235,7 @@ contract Handler is Test, BaseSetup {
             bool shouldTransferFail =
                 shouldNextActionFail(currentActor, tokenIdValueToTransfer, address(uniswapWrapper));
 
-            if (shouldTransferFail && to != currentActor) {
+            if (shouldTransferFail && to != currentActor && FAIL_ON_REVERT) {
                 vm.expectRevert();
             }
 
@@ -337,7 +342,7 @@ contract Handler is Test, BaseSetup {
             bool shouldUnwrapFail = shouldNextActionFail(currentActor, tokenIdValueToTransfer, address(uniswapWrapper))
                 || isZeroLiquidityDecreased(tokenId, unwrapAmount, isV3);
 
-            if (shouldUnwrapFail) {
+            if (shouldUnwrapFail && FAIL_ON_REVERT) {
                 vm.expectRevert();
             }
 
@@ -379,7 +384,7 @@ contract Handler is Test, BaseSetup {
 
         uint256 enabledTokenIdsLengthBefore = uniswapWrapper.totalTokenIdsEnabledBy(currentActor);
 
-        if (enabledTokenIdsLengthBefore == 7) vm.expectRevert(); //we know it is not allowed to enable more than 7 tokenIds
+        if (enabledTokenIdsLengthBefore == 7 && FAIL_ON_REVERT) vm.expectRevert(); //we know it is not allowed to enable more than 7 tokenIds
 
         uniswapWrapper.enableTokenIdAsCollateral(tokenId);
 
@@ -424,7 +429,7 @@ contract Handler is Test, BaseSetup {
                 address(uniswapWrapper)
             );
 
-            if (shouldDisableTokenIdFail) {
+            if (shouldDisableTokenIdFail && FAIL_ON_REVERT) {
                 vm.expectRevert();
             }
         }
@@ -549,6 +554,8 @@ contract Handler is Test, BaseSetup {
     function borrowUpToMax(address account, IEVault vault, uint256 borrowAmount) internal returns (uint256) {
         uint256 maxBorrowAmount = getMaxBorrowAmount(account, vault);
 
+        if (maxBorrowAmount < 10) return 0; //skip if max borrow amount is too small
+
         maxBorrowAmount = bound(maxBorrowAmount, 0, type(uint104).max); //avoid amount too large to encode error in euler vaults
 
         borrowAmount = bound(borrowAmount, 0, maxBorrowAmount);
@@ -559,6 +566,7 @@ contract Handler is Test, BaseSetup {
 
         address[] memory enabledControllers = evc.getControllers(account);
 
+        //If there are no enabled controllers, we enable the vault and collaterals first and then borrow
         if (enabledControllers.length == 0) {
             evc.enableController(account, address(vault));
             evc.enableCollateral(account, address(uniswapV3Wrapper));
@@ -566,7 +574,8 @@ contract Handler is Test, BaseSetup {
             vault.borrow(borrowAmount, account);
             return borrowAmount;
         }
-
+        // borrow only if the vault is already enabled as controller
+        // if not, we skip the borrow to avoid revert
         if (enabledControllers[0] == address(vault)) {
             vault.borrow(borrowAmount, account);
             return borrowAmount;

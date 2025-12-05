@@ -17,6 +17,8 @@ interface IMockUniswapWrapper is IERC721WrapperBase, IERC6909TokenSupply {
         uint256 balanceBeforeUnwrap
     ) external view returns (uint256);
 
+    function isZeroLiquidityDecreased(uint256 tokenId, uint256 unwrapAmount) external view returns (bool);
+
     function getSqrtRatioX96(address, address, uint256, uint256) external view returns (uint160 sqrtRatioX96);
 
     function getSqrtRatioX96FromOracle(address token0, address token1, uint256 unit0, uint256 unit1)

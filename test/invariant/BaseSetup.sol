@@ -59,6 +59,7 @@ import {WETH} from "lib/euler-price-oracle/lib/solady/src/tokens/WETH.sol";
 import {MockUniswapV4Wrapper} from "test/helpers/MockUniswapV4Wrapper.sol";
 import {MockUniswapV3Wrapper} from "test/helpers/MockUniswapV3Wrapper.sol";
 import {Create2} from "lib/openzeppelin-contracts/contracts/utils/Create2.sol";
+import {FeeDonator} from "test/helpers/FeeDonator.sol";
 
 contract MockReturnsWETH9 {
     address public immutable weth;
@@ -82,6 +83,8 @@ contract BaseSetup is Test, Fuzzers {
     INonfungiblePositionManager public nonFungiblePositionManager;
     IUniswapV3Pool public v3Pool;
     MockUniswapV3Wrapper public uniswapV3Wrapper;
+
+    FeeDonator public feeDonator;
 
     EthereumVaultConnector public evc;
     GenericFactory public genericFactory;
@@ -225,6 +228,8 @@ contract BaseSetup is Test, Fuzzers {
         uniswapV3Wrapper = new MockUniswapV3Wrapper(
             address(evc), address(nonFungiblePositionManager), address(oracle), unitOfAccount, address(v3Pool)
         );
+
+        feeDonator = new FeeDonator(address(v3Pool), address(poolManager), poolKey);
 
         oracle.setPrice(address(tokenA), unitOfAccount, 1e18); // Set initial price to 1:1
         oracle.setPrice(address(tokenB), unitOfAccount, 1e18); // Set initial price to 1:1

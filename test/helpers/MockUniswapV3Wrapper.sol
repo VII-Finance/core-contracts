@@ -53,7 +53,7 @@ contract MockUniswapV3Wrapper is UniswapV3Wrapper {
         return _totalPositionValue(sqrtRatioX96, tokenId);
     }
 
-    function pendingFees(uint256 tokenId) external view returns (uint256 totalPendingFees0, uint256 totalPendingFees1) {
+    function pendingFees(uint256 tokenId) public view returns (uint256 totalPendingFees0, uint256 totalPendingFees1) {
         (uint160 sqrtRatioX96,,,,,,) = pool.slot0();
         (
             ,,,,,
@@ -75,6 +75,45 @@ contract MockUniswapV3Wrapper is UniswapV3Wrapper {
 
         totalPendingFees0 = feesOwed0 + tokensOwed0;
         totalPendingFees1 = feesOwed1 + tokensOwed1;
+    }
+
+    function tokensOwed(uint256 tokenId) external view returns (uint128 fees0Owed, uint128 fees1Owed) {
+        (,,,,,,,,,, uint128 tokensOwed0, uint128 tokensOwed1) =
+            INonfungiblePositionManager(address(underlying)).positions(tokenId);
+        fees0Owed = tokensOwed0;
+        fees1Owed = tokensOwed1;
+    }
+
+    //given unwrap amount, the UniswapV3Wrapper will calculate the liquidity to be removed
+    //if the liquidity to be removed is zero, call to the UniswapV3Pool will fails
+    //even if liquidity to be removed is non-zero, it may still result in amount0 and amount1 being zero
+    //which will make the collect call fail as well
+    function isZeroLiquidityDecreased(uint256 tokenId, uint256 unwrapAmount) public view returns (bool) {
+        // in NonFungiblePositionManager, decrease liquidity fails if liquidity being removed is zero
+        if (unwrapAmount == 0) {
+            return true;
+        }
+
+        (,,,,, int24 tickLower, int24 tickUpper, uint128 liquidity,,,,) =
+            INonfungiblePositionManager(address(underlying)).positions(tokenId);
+        uint128 liquidityToRemove = uint128(proportionalShare(liquidity, unwrapAmount, totalSupply(tokenId)));
+
+        if (liquidityToRemove == 0) {
+            return true;
+        }
+
+        // also make sure amount0 and amount1 resulting from liquidityToRemove is not zero either
+        // call to collect it will fail otherwise
+        (uint160 sqrtRatioX96,,,,,,) = pool.slot0();
+        (uint256 amount0, uint256 amount1) =
+            UniswapPositionValueHelper.principal(sqrtRatioX96, tickLower, tickUpper, liquidityToRemove);
+
+        //even if amount0 and amount1 are both zero, if user's share of pending fees is non-zero, collect will still succeed
+        (uint256 totalPendingFees0, uint256 totalPendingFees1) = pendingFees(tokenId);
+
+        return (amount0 == 0 && amount1 == 0
+                && proportionalShare(totalPendingFees0, unwrapAmount, totalSupply(tokenId)) == 0
+                && proportionalShare(totalPendingFees1, unwrapAmount, totalSupply(tokenId)) == 0);
     }
 
     struct Local {
@@ -131,6 +170,10 @@ contract MockUniswapV3Wrapper is UniswapV3Wrapper {
                 local.feeGrowthInside1LastX128,
                 local.liquidity
             );
+
+            //remove proportional share from tokens owed as well
+            local.tokensOwed0 -= proportionalShare(local.tokensOwed0, unwrapAmount, totalSupply(tokenId)).toUint128();
+            local.tokensOwed1 -= proportionalShare(local.tokensOwed1, unwrapAmount, totalSupply(tokenId)).toUint128();
 
             totalAmountInUnitOfAccount = getQuote(amount0Principal + feesOwed0 + local.tokensOwed0, token0)
                 + getQuote(amount1Principal + feesOwed1 + local.tokensOwed1, token1);

@@ -75,24 +75,35 @@ contract MockUniswapV4Wrapper is UniswapV4Wrapper {
         uint256 balanceBeforeUnwrap
     ) public view returns (uint256) {
         PositionState memory positionState = _getPositionState(tokenId, true);
-        uint128 liquidityToRemove =
-            proportionalShare(positionState.liquidity, unwrapAmount, totalSupply(tokenId)).toUint128();
+        {
+            uint128 liquidityToRemove =
+                proportionalShare(positionState.liquidity, unwrapAmount, totalSupply(tokenId)).toUint128();
 
-        positionState.liquidity -= liquidityToRemove;
+            positionState.liquidity -= liquidityToRemove;
+        }
 
-        (uint256 amount0, uint256 amount1) = _total(positionState, tokenId);
+        uint256 totalAmountInUnitOfAccount;
 
-        uint256 amount0InUnitOfAccount = getQuote(amount0, _getCurrencyAddress(poolKey.currency0));
-        uint256 amount1InUnitOfAccount = getQuote(amount1, _getCurrencyAddress(poolKey.currency1));
+        {
+            (uint256 amount0, uint256 amount1) = _principal(positionState);
+            (uint256 feesOwed0, uint256 feesOwed1) = _pendingFees(positionState);
+
+            uint256 feesOwed0FromEarlierPositions = tokensOwed[tokenId].fees0Owed
+                - proportionalShare(tokensOwed[tokenId].fees0Owed, unwrapAmount, totalSupply(tokenId));
+            uint256 feesOwed1FromEarlierPositions = tokensOwed[tokenId].fees1Owed
+                - proportionalShare(tokensOwed[tokenId].fees1Owed, unwrapAmount, totalSupply(tokenId));
+
+            totalAmountInUnitOfAccount = getQuote(
+                amount0 + feesOwed0 + feesOwed0FromEarlierPositions, _getCurrencyAddress(poolKey.currency0)
+            ) + getQuote(amount1 + feesOwed1 + feesOwed1FromEarlierPositions, _getCurrencyAddress(poolKey.currency1));
+        }
 
         //avoid division by zero
         if (totalSupply(tokenId) == unwrapAmount) {
             return 0;
         }
         return proportionalShare(
-            amount0InUnitOfAccount + amount1InUnitOfAccount,
-            balanceBeforeUnwrap - unwrapAmount,
-            totalSupply(tokenId) - unwrapAmount
+            totalAmountInUnitOfAccount, balanceBeforeUnwrap - unwrapAmount, totalSupply(tokenId) - unwrapAmount
         );
     }
 

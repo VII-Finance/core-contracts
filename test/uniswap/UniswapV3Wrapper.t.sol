@@ -338,10 +338,15 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
         bool isZeroLiquidityDecreased =
             MockUniswapV3Wrapper((address(wrapper))).isZeroLiquidityDecreased(tokenIdMinted, partialUnwrapAmount);
 
+        uint256 expectedValueAfter = MockUniswapV3Wrapper(payable(address(wrapper)))
+            .calculateExactedValueOfTokenIdAfterUnwrap(tokenIdMinted, partialUnwrapAmount, wrapper.FULL_AMOUNT());
+
         if (isZeroLiquidityDecreased) {
             vm.expectRevert();
         }
         wrapper.unwrap(borrower, tokenIdMinted, borrower, partialUnwrapAmount, "");
+
+        assertApproxEqAbs(wrapper.balanceOf(borrower), expectedValueAfter, 1e18);
 
         if (!isZeroLiquidityDecreased) {
             (uint256 currentFees0Owed, uint256 currentFees1Owed) =

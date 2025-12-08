@@ -25,7 +25,6 @@ import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {Addresses} from "test/helpers/Addresses.sol";
 import {MockUniswapV3Wrapper} from "test/helpers/MockUniswapV3Wrapper.sol";
 
-
 contract UniswapV3WrapperTest is Test, UniswapBaseTest {
     uint24 fee;
     INonfungiblePositionManager nonFungiblePositionManager;

@@ -23,59 +23,8 @@ import {UniswapPositionValueHelper} from "src/libraries/UniswapPositionValueHelp
 import {UniswapMintPositionHelper} from "src/uniswap/periphery/UniswapMintPositionHelper.sol";
 import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {Addresses} from "test/helpers/Addresses.sol";
+import {MockUniswapV3Wrapper} from "test/helpers/MockUniswapV3Wrapper.sol";
 
-contract MockUniswapV3Wrapper is UniswapV3Wrapper {
-    constructor(address _evc, address _positionManager, address _oracle, address _unitOfAccount, address _pool)
-        UniswapV3Wrapper(_evc, _positionManager, _oracle, _unitOfAccount, _pool)
-    {}
-
-    function syncFeesOwned(uint256 tokenId) external returns (uint256 actualFees0, uint256 actualFees1) {
-        (,,,,,,,,,, uint256 tokensOwed0Before, uint256 tokensOwed1Before) =
-            INonfungiblePositionManager(address(underlying)).positions(tokenId);
-
-        INonfungiblePositionManager(address(underlying))
-            .collect(
-                INonfungiblePositionManager.CollectParams({
-                    tokenId: tokenId, recipient: address(0), amount0Max: 1, amount1Max: 1
-                })
-            );
-
-        (,,,,,,,,,, uint256 tokensOwed0After, uint256 tokensOwed1After) =
-            INonfungiblePositionManager(address(underlying)).positions(tokenId);
-
-        actualFees0 = (tokensOwed0After - tokensOwed0Before);
-        actualFees1 = (tokensOwed1After - tokensOwed1Before);
-    }
-
-    function getFeeGrowthInside(int24 tickLower, int24 tickUpper)
-        external
-        view
-        returns (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128)
-    {
-        return _getFeeGrowthInside(tickLower, tickUpper);
-    }
-
-    function totalPositionValue(uint160 sqrtRatioX96, uint256 tokenId)
-        external
-        view
-        returns (uint256 amount0Total, uint256 amount1Total)
-    {
-        return _totalPositionValue(sqrtRatioX96, tokenId);
-    }
-
-    //All of tests use the spot price from the pool instead of the oracle
-    function getSqrtRatioX96(address, address, uint256, uint256) public view override returns (uint160 sqrtRatioX96) {
-        (sqrtRatioX96,,,,,,) = pool.slot0();
-    }
-
-    function getSqrtRatioX96FromOracle(address token0, address token1, uint256 unit0, uint256 unit1)
-        public
-        view
-        returns (uint160 sqrtRatioX96)
-    {
-        return super.getSqrtRatioX96(token0, token1, unit0, unit1);
-    }
-}
 
 contract UniswapV3WrapperTest is Test, UniswapBaseTest {
     uint24 fee;

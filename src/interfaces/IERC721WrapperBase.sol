@@ -26,4 +26,8 @@ interface IERC721WrapperBase is IPartialERC20 {
     function validatePosition(uint256 tokenId) external view;
     function getTokenIdToSkim() external view returns (uint256);
     function calculateValueOfTokenId(uint256 tokenId, uint256 amount) external view returns (uint256);
+    function proportionalShare(uint256 amount, uint256 part, uint256 totalSupplyOfTokenId)
+        external
+        pure
+        returns (uint256);
 }

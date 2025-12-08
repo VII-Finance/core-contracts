@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity 0.8.26;
 
-import {IERC6909, ERC6909} from "lib/openzeppelin-contracts/contracts/token/ERC6909/draft-ERC6909.sol";
-import {
-    ERC6909TokenSupply
-} from "lib/openzeppelin-contracts/contracts/token/ERC6909/extensions/draft-ERC6909TokenSupply.sol";
+import {IERC6909, ERC6909} from "lib/openzeppelin-contracts/contracts/token/ERC6909/ERC6909.sol";
+import {ERC6909TokenSupply} from "lib/openzeppelin-contracts/contracts/token/ERC6909/extensions/ERC6909TokenSupply.sol";
 import {EnumerableSet} from "lib/openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
 import {Context} from "lib/openzeppelin-contracts/contracts/utils/Context.sol";
 import {IERC721} from "lib/openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
@@ -14,7 +12,6 @@ import {IERC721WrapperBase} from "src/interfaces/IERC721WrapperBase.sol";
 import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {IERC20Metadata} from "lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeCast} from "lib/v4-periphery/lib/v4-core/src/libraries/SafeCast.sol";
-import {IEVault} from "lib/euler-interfaces/interfaces/IEVault.sol";
 
 abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721WrapperBase {
     uint256 public constant FULL_AMOUNT = 1e36;

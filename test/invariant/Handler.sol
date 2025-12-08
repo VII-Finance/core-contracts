@@ -294,6 +294,12 @@ contract Handler is Test, BaseSetup {
             return; //skip if current actor has no balance
         }
 
+        // this is a workaround to make sure the calculateExactedValueOfTokenIdAfterUnwrap works correctly
+        // unwrapping the 0 amount will convert the pending fees into feesOwed tracked in the v4 wrapper contract
+        // this way the calculation in calculateExactedValueOfTokenIdAfterUnwrap is the exact same the actual unwrap call
+        //if not done then there will be an error of 1 wei and that is problematic because then we can't accurately predict if the next call will fails or not
+        if (!isV3) uniswapWrapper.unwrap(currentActor, tokenId, currentActor, 0, "");
+
         unwrapAmount = bound(unwrapAmount, 0, balanceBeforeUnwrap);
 
         {

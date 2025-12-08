@@ -346,7 +346,7 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
         }
         wrapper.unwrap(borrower, tokenIdMinted, borrower, partialUnwrapAmount, "");
 
-        assertApproxEqAbs(wrapper.balanceOf(borrower), expectedValueAfter, 1e18);
+        assertApproxEqAbs(wrapper.balanceOf(borrower), expectedValueAfter, 1e17);
 
         if (!isZeroLiquidityDecreased) {
             (uint256 currentFees0Owed, uint256 currentFees1Owed) =

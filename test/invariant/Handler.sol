@@ -341,53 +341,49 @@ contract Handler is Test, BaseSetup {
 
         unwrapAmount = bound(unwrapAmount, 0, local.balanceBeforeUnwrap);
 
-        {
-            local.tokenIdValueBeforeUnwrap =
-                uniswapWrapper.calculateValueOfTokenId(local.tokenId, local.balanceBeforeUnwrap);
+        (local.previewUnwrapAmount0, local.previewUnwrapAmount1) =
+            uniswapWrapper.previewUnwrap(local.tokenId, getCurrentPriceX96(isV3), unwrapAmount);
 
-            local.expectTokenIdValueAfterUnwrap = uniswapWrapper.calculateExactedValueOfTokenIdAfterUnwrap(
-                local.tokenId, unwrapAmount, local.balanceBeforeUnwrap
-            );
+        local.token0BalanceBeforeOfCurrentActor = token0.balanceOf(currentActor);
+        local.token1BalanceBeforeOfCurrentActor = token1.balanceOf(currentActor);
 
-            //get the value of the tokenId
-            local.tokenIdValueToTransfer = local.tokenIdValueBeforeUnwrap - local.expectTokenIdValueAfterUnwrap; //We are not calculating the amount directly to avoid miscalculation due to rounding error
+        local.tokenIdValueBeforeUnwrap =
+            uniswapWrapper.calculateValueOfTokenId(local.tokenId, local.balanceBeforeUnwrap);
 
-            //if this tokenId is not enabled as collateral then the value being transferred is 0
-            if (!tokenIdInfo[local.tokenId][isV3].isEnabled[currentActor]) {
-                local.tokenIdValueToTransfer = 0;
-            }
+        local.expectTokenIdValueAfterUnwrap = uniswapWrapper.calculateExactedValueOfTokenIdAfterUnwrap(
+            local.tokenId, unwrapAmount, local.balanceBeforeUnwrap
+        );
 
-            local.shouldUnwrapFail = shouldNextActionFail(
-                currentActor, local.tokenIdValueToTransfer, address(uniswapWrapper)
-            ) || isZeroLiquidityDecreased(local.tokenId, unwrapAmount, isV3);
+        //get the value of the tokenId
+        local.tokenIdValueToTransfer = local.tokenIdValueBeforeUnwrap - local.expectTokenIdValueAfterUnwrap; //We are not calculating the amount directly to avoid miscalculation due to rounding error
 
-            if (local.shouldUnwrapFail && FAIL_ON_REVERT) {
-                vm.expectRevert();
-            }
-
-            {
-                (local.previewUnwrapAmount0, local.previewUnwrapAmount1) =
-                    uniswapWrapper.previewUnwrap(local.tokenId, getCurrentPriceX96(isV3), unwrapAmount);
-
-                local.token0BalanceBeforeOfCurrentActor = token0.balanceOf(currentActor);
-                local.token1BalanceBeforeOfCurrentActor = token1.balanceOf(currentActor);
-
-                uniswapWrapper.unwrap(currentActor, local.tokenId, currentActor, unwrapAmount, "");
-
-                assertEq(
-                    token0.balanceOf(currentActor),
-                    local.token0BalanceBeforeOfCurrentActor + local.previewUnwrapAmount0,
-                    "uniswapWrapper: unwrap should increase token0 balance of currentActor"
-                );
-                assertEq(
-                    token1.balanceOf(currentActor),
-                    local.token1BalanceBeforeOfCurrentActor + local.previewUnwrapAmount1,
-                    "uniswapWrapper: unwrap should increase token1 balance of currentActor"
-                );
-            }
-
-            if (local.shouldUnwrapFail) return; //if the unwrap should fail, we can skip the rest of the assertions
+        //if this tokenId is not enabled as collateral then the value being transferred is 0
+        if (!tokenIdInfo[local.tokenId][isV3].isEnabled[currentActor]) {
+            local.tokenIdValueToTransfer = 0;
         }
+
+        local.shouldUnwrapFail = shouldNextActionFail(
+            currentActor, local.tokenIdValueToTransfer, address(uniswapWrapper)
+        ) || isZeroLiquidityDecreased(local.tokenId, unwrapAmount, isV3);
+
+        if (local.shouldUnwrapFail && FAIL_ON_REVERT) {
+            vm.expectRevert();
+        }
+
+        uniswapWrapper.unwrap(currentActor, local.tokenId, currentActor, unwrapAmount, "");
+
+        if (local.shouldUnwrapFail) return; //if the unwrap should fail, we can skip the rest of the assertions
+
+        assertEq(
+            token0.balanceOf(currentActor),
+            local.token0BalanceBeforeOfCurrentActor + local.previewUnwrapAmount0,
+            "uniswapWrapper: unwrap should increase token0 balance of currentActor"
+        );
+        assertEq(
+            token1.balanceOf(currentActor),
+            local.token1BalanceBeforeOfCurrentActor + local.previewUnwrapAmount1,
+            "uniswapWrapper: unwrap should increase token1 balance of currentActor"
+        );
 
         //We need to independently find out the amount user spent on the tokenId
         if (unwrapAmount == local.balanceBeforeUnwrap) {

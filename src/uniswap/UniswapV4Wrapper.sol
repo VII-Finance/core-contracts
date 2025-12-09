@@ -177,14 +177,16 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         PositionState memory positionState = _getPositionState(tokenId, false);
         positionState.sqrtRatioX96 = sqrtRatioX96;
 
+        uint256 totalSupplyOfTokenId = totalSupply(tokenId);
+
         uint128 liquidityToRemove =
-            proportionalShare(positionState.liquidity, unwrapAmount, totalSupply(tokenId)).toUint128();
+            proportionalShare(positionState.liquidity, unwrapAmount, totalSupplyOfTokenId).toUint128();
         (amount0, amount1) = _principal(positionState, liquidityToRemove);
 
         (uint256 pendingFees0, uint256 pendingFees1) = _pendingFees(positionState);
 
-        amount0 += proportionalShare(pendingFees0 + tokensOwed[tokenId].fees0Owed, unwrapAmount, totalSupply(tokenId));
-        amount1 += proportionalShare(pendingFees1 + tokensOwed[tokenId].fees1Owed, unwrapAmount, totalSupply(tokenId));
+        amount0 += proportionalShare(pendingFees0 + tokensOwed[tokenId].fees0Owed, unwrapAmount, totalSupplyOfTokenId);
+        amount1 += proportionalShare(pendingFees1 + tokensOwed[tokenId].fees1Owed, unwrapAmount, totalSupplyOfTokenId);
     }
 
     /// @notice Gets the token ID that was just minted

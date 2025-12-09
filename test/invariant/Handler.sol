@@ -346,7 +346,27 @@ contract Handler is Test, BaseSetup {
                 vm.expectRevert();
             }
 
-            uniswapWrapper.unwrap(currentActor, tokenId, currentActor, unwrapAmount, "");
+            {
+
+                // (uint256 previewUnwrapAmount0, uint256 previewUnwrapAmount1) =
+                //     uniswapWrapper.previewUnwrap(tokenId, getCurrentPriceX96(isV3), unwrapAmount);
+
+                // uint256 token0BalanceBeforeOfCurrentActor = token0.balanceOf(currentActor);
+                // uint256 token1BalanceBeforeOfCurrentActor = token1.balanceOf(currentActor);
+
+                uniswapWrapper.unwrap(currentActor, tokenId, currentActor, unwrapAmount, "");
+
+                // assertEq(
+                //     token0.balanceOf(currentActor),
+                //     token0BalanceBeforeOfCurrentActor + previewUnwrapAmount0,
+                //     "uniswapWrapper: unwrap should increase token0 balance of currentActor"
+                // );
+                // assertEq(
+                //     token1.balanceOf(currentActor),
+                //     token1BalanceBeforeOfCurrentActor + previewUnwrapAmount1,
+                //     "uniswapWrapper: unwrap should increase token1 balance of currentActor"
+                // );
+            }
 
             if (shouldUnwrapFail) return; //if the unwrap should fail, we can skip the rest of the assertions
         }

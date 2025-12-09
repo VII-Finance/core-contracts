@@ -117,8 +117,8 @@ contract BaseSetup is Test, Fuzzers {
     uint24 fee = 3000;
     int24 tickSpacing = 60;
 
-    IERC20 token0;
-    IERC20 token1;
+    IERC20 public token0;
+    IERC20 public token1;
 
     WETH public weth;
 

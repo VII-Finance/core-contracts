@@ -15,10 +15,13 @@ import {IPositionManager} from "lib/v4-periphery/src/interfaces/IPositionManager
 import {Actions} from "lib/v4-periphery/src/libraries/Actions.sol";
 import {ActionConstants} from "lib/v4-periphery/src/libraries/ActionConstants.sol";
 import {IWETH9} from "lib/v4-periphery/src/interfaces/external/IWETH9.sol";
+import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 
 contract UniswapV4Vault is BaseVault {
+    using StateLibrary for IPoolManager;
     address public immutable weth;
     IPoolManager public immutable poolManager;
+    PoolId public immutable poolId;
     PoolKey public poolKey;
 
     using StateLibrary for IPoolManager;
@@ -32,6 +35,7 @@ contract UniswapV4Vault is BaseVault {
         (Currency currency0, Currency currency1, uint24 fee, int24 tickSpacing, IHooks hooks) = v4Wrapper.poolKey();
         poolKey =
             PoolKey({currency0: currency0, currency1: currency1, fee: fee, tickSpacing: tickSpacing, hooks: hooks});
+        poolId = poolKey.toId();
     }
 
     //this gets called in the constructor of BaseVault so it shouldn't be using immutables
@@ -95,7 +99,9 @@ contract UniswapV4Vault is BaseVault {
         );
     }
 
-    function calculateAmounts(uint256 tokenId) public view override returns (uint256, uint256) {}
+    function calculateAmounts(uint256 tokenId) public view override returns (uint256, uint256) {
+    }
+
 
     receive() external payable {}
 }

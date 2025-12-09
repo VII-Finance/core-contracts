@@ -8,6 +8,7 @@ import {UniswapV3Wrapper} from "src/uniswap/UniswapV3Wrapper.sol";
 import {IUniswapV3Pool} from "lib/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IEVault} from "lib/euler-interfaces/interfaces/IEVault.sol";
 import {INonfungiblePositionManager} from "lib/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
+import {UniswapPositionValueHelper} from "src/libraries/UniswapPositionValueHelper.sol";
 
 contract UniswapV3Vault is BaseVault {
     IUniswapV3Pool public immutable pool;
@@ -58,5 +59,6 @@ contract UniswapV3Vault is BaseVault {
         (tokenId,,,) = INonfungiblePositionManager(address(positionManager)).mint(params);
     }
 
-    function calculateAmounts(uint256 tokenId) public view override returns (uint256, uint256) {}
+    function calculateAmounts(uint256 tokenId) public view override returns (uint256, uint256) {
+    }
 }

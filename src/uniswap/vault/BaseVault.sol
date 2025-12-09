@@ -124,12 +124,30 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         //we need to get how much amount0 and amount1 the underlying token is worth.
         //The plan is to do the calculations here in this contract instead of doing an external call
         (uint256 amount0, uint256 amount1) = calculateAmounts(tokenId);
+        
         uint256 currentPrice = getCurrentSqrtPriceX96();
+        int256 priceIn18Decimals = (int256(currentPrice) * int256(currentPrice) * 1e18) >> (96 * 2);
 
         uint256 borrowedAmount = borrowVault.debtOf(address(this));
 
         int256 effectiveBorrowTokenAmount =
             int256(isTokenBeingBorrowedToken0() ? amount0 : amount1) - int256(borrowedAmount);
+        
+        console.log("effective borrow token amount", effectiveBorrowTokenAmount);
+        console.log("borrowed amount", borrowedAmount);
+        console.log("amount0", amount0);
+        console.log("amount1", amount1);
+        console.log("price in 18 decimals", priceIn18Decimals);
+        console.log("is token0 being borrowed", isTokenBeingBorrowedToken0());
+        
+        // we need to convert borrow amount to asset amount using current price
+        int256 effectiveBorrowAmountInAsset = isTokenBeingBorrowedToken0()
+            ? ((effectiveBorrowTokenAmount) * 1e18) / priceIn18Decimals
+            : ((effectiveBorrowTokenAmount) * priceIn18Decimals) / 1e18;
+        
+        return uint256(isTokenBeingBorrowedToken0()
+            ? int256(amount1) + effectiveBorrowAmountInAsset
+            : int256(amount0) + effectiveBorrowAmountInAsset);
     }
 
     function getDebtAmount(uint256 assets) public view returns (uint256 debtAmount, uint128 liquidity) {

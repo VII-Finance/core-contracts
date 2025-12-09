@@ -31,4 +31,9 @@ abstract contract BaseVaultTest is UniswapBaseTest {
         IERC20(vault.asset()).forceApprove(address(vault), type(uint256).max);
         vault.initializeVault(initialAmount);
     }
+
+    function test_totalAssets() public{
+        test_initiate_vault();
+        console.log("total assets after init", vault.totalAssets());
+    }
 }

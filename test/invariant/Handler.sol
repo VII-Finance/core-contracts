@@ -306,80 +306,98 @@ contract Handler is Test, BaseSetup {
         return (amount0 == 0 && amount1 == 0);
     }
 
+    struct LocalVars {
+        uint256[] tokenIds;
+        uint256 tokenId;
+        uint256 balanceBeforeUnwrap;
+        uint256 tokenIdValueBeforeUnwrap;
+        uint256 expectTokenIdValueAfterUnwrap;
+        uint256 tokenIdValueToTransfer;
+        bool shouldUnwrapFail;
+        uint256 previewUnwrapAmount0;
+        uint256 previewUnwrapAmount1;
+        uint256 token0BalanceBeforeOfCurrentActor;
+        uint256 token1BalanceBeforeOfCurrentActor;
+    }
+
     function partialUnwrap(uint256 actorIndexSeed, bool isV3, uint256 tokenIdIndexSeed, uint256 unwrapAmount)
         public
         useActor(actorIndexSeed)
         useUniswapWrapper(isV3)
     {
-        uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor, isV3);
-        if (tokenIds.length == 0) {
+        LocalVars memory local;
+
+        local.tokenIds = getTokenIdsHeldByActor(currentActor, isV3);
+        if (local.tokenIds.length == 0) {
             return; //skip if current actor has no tokenIds
         }
-        uint256 tokenId = tokenIds[bound(tokenIdIndexSeed, 0, tokenIds.length - 1)];
+        local.tokenId = local.tokenIds[bound(tokenIdIndexSeed, 0, local.tokenIds.length - 1)];
 
-        uint256 balanceBeforeUnwrap = uniswapWrapper.balanceOf(currentActor, tokenId);
+        local.balanceBeforeUnwrap = uniswapWrapper.balanceOf(currentActor, local.tokenId);
 
-        if (balanceBeforeUnwrap == 0) {
+        if (local.balanceBeforeUnwrap == 0) {
             return; //skip if current actor has no balance
         }
 
-        unwrapAmount = bound(unwrapAmount, 0, balanceBeforeUnwrap);
+        unwrapAmount = bound(unwrapAmount, 0, local.balanceBeforeUnwrap);
 
         {
-            uint256 tokenIdValueBeforeUnwrap = uniswapWrapper.calculateValueOfTokenId(tokenId, balanceBeforeUnwrap);
+            local.tokenIdValueBeforeUnwrap =
+                uniswapWrapper.calculateValueOfTokenId(local.tokenId, local.balanceBeforeUnwrap);
 
-            uint256 expectTokenIdValueAfterUnwrap =
-                uniswapWrapper.calculateExactedValueOfTokenIdAfterUnwrap(tokenId, unwrapAmount, balanceBeforeUnwrap);
+            local.expectTokenIdValueAfterUnwrap = uniswapWrapper.calculateExactedValueOfTokenIdAfterUnwrap(
+                local.tokenId, unwrapAmount, local.balanceBeforeUnwrap
+            );
 
             //get the value of the tokenId
-            uint256 tokenIdValueToTransfer = tokenIdValueBeforeUnwrap - expectTokenIdValueAfterUnwrap; //We are not calculating the amount directly to avoid miscalculation due to rounding error
+            local.tokenIdValueToTransfer = local.tokenIdValueBeforeUnwrap - local.expectTokenIdValueAfterUnwrap; //We are not calculating the amount directly to avoid miscalculation due to rounding error
 
             //if this tokenId is not enabled as collateral then the value being transferred is 0
-            if (!tokenIdInfo[tokenId][isV3].isEnabled[currentActor]) {
-                tokenIdValueToTransfer = 0;
+            if (!tokenIdInfo[local.tokenId][isV3].isEnabled[currentActor]) {
+                local.tokenIdValueToTransfer = 0;
             }
 
-            bool shouldUnwrapFail = shouldNextActionFail(currentActor, tokenIdValueToTransfer, address(uniswapWrapper))
-                || isZeroLiquidityDecreased(tokenId, unwrapAmount, isV3);
+            local.shouldUnwrapFail = shouldNextActionFail(
+                currentActor, local.tokenIdValueToTransfer, address(uniswapWrapper)
+            ) || isZeroLiquidityDecreased(local.tokenId, unwrapAmount, isV3);
 
-            if (shouldUnwrapFail && FAIL_ON_REVERT) {
+            if (local.shouldUnwrapFail && FAIL_ON_REVERT) {
                 vm.expectRevert();
             }
 
             {
+                (local.previewUnwrapAmount0, local.previewUnwrapAmount1) =
+                    uniswapWrapper.previewUnwrap(local.tokenId, getCurrentPriceX96(isV3), unwrapAmount);
 
-                // (uint256 previewUnwrapAmount0, uint256 previewUnwrapAmount1) =
-                //     uniswapWrapper.previewUnwrap(tokenId, getCurrentPriceX96(isV3), unwrapAmount);
+                local.token0BalanceBeforeOfCurrentActor = token0.balanceOf(currentActor);
+                local.token1BalanceBeforeOfCurrentActor = token1.balanceOf(currentActor);
 
-                // uint256 token0BalanceBeforeOfCurrentActor = token0.balanceOf(currentActor);
-                // uint256 token1BalanceBeforeOfCurrentActor = token1.balanceOf(currentActor);
+                uniswapWrapper.unwrap(currentActor, local.tokenId, currentActor, unwrapAmount, "");
 
-                uniswapWrapper.unwrap(currentActor, tokenId, currentActor, unwrapAmount, "");
-
-                // assertEq(
-                //     token0.balanceOf(currentActor),
-                //     token0BalanceBeforeOfCurrentActor + previewUnwrapAmount0,
-                //     "uniswapWrapper: unwrap should increase token0 balance of currentActor"
-                // );
-                // assertEq(
-                //     token1.balanceOf(currentActor),
-                //     token1BalanceBeforeOfCurrentActor + previewUnwrapAmount1,
-                //     "uniswapWrapper: unwrap should increase token1 balance of currentActor"
-                // );
+                assertEq(
+                    token0.balanceOf(currentActor),
+                    local.token0BalanceBeforeOfCurrentActor + local.previewUnwrapAmount0,
+                    "uniswapWrapper: unwrap should increase token0 balance of currentActor"
+                );
+                assertEq(
+                    token1.balanceOf(currentActor),
+                    local.token1BalanceBeforeOfCurrentActor + local.previewUnwrapAmount1,
+                    "uniswapWrapper: unwrap should increase token1 balance of currentActor"
+                );
             }
 
-            if (shouldUnwrapFail) return; //if the unwrap should fail, we can skip the rest of the assertions
+            if (local.shouldUnwrapFail) return; //if the unwrap should fail, we can skip the rest of the assertions
         }
 
         //We need to independently find out the amount user spent on the tokenId
-        if (unwrapAmount == balanceBeforeUnwrap) {
-            tokenIdsHeldByActor[currentActor][isV3].remove(tokenId);
-            tokenIdInfo[tokenId][isV3].holders.remove(currentActor);
+        if (unwrapAmount == local.balanceBeforeUnwrap) {
+            tokenIdsHeldByActor[currentActor][isV3].remove(local.tokenId);
+            tokenIdInfo[local.tokenId][isV3].holders.remove(currentActor);
         }
 
         assertEq(
-            uniswapWrapper.balanceOf(currentActor, tokenId),
-            balanceBeforeUnwrap - unwrapAmount,
+            uniswapWrapper.balanceOf(currentActor, local.tokenId),
+            local.balanceBeforeUnwrap - unwrapAmount,
             "uniswapWrapper: partial unwrap should decrease balance of sender"
         );
     }

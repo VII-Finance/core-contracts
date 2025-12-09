@@ -169,6 +169,24 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         return proportionalShare(amount0InUnitOfAccount + amount1InUnitOfAccount, amount, totalSupply(tokenId));
     }
 
+    function previewUnwrap(uint256 tokenId, uint160 sqrtRatioX96, uint256 unwrapAmount)
+        public
+        view
+        returns (uint256 amount0, uint256 amount1)
+    {
+        PositionState memory positionState = _getPositionState(tokenId, false);
+        positionState.sqrtRatioX96 = sqrtRatioX96;
+
+        uint128 liquidityToRemove =
+            proportionalShare(positionState.liquidity, unwrapAmount, totalSupply(tokenId)).toUint128();
+        (amount0, amount1) = _principal(positionState, liquidityToRemove);
+
+        (uint256 pendingFees0, uint256 pendingFees1) = _pendingFees(positionState);
+
+        amount0 += proportionalShare(pendingFees0 + tokensOwed[tokenId].fees0Owed, unwrapAmount, totalSupply(tokenId));
+        amount1 += proportionalShare(pendingFees1 + tokensOwed[tokenId].fees1Owed, unwrapAmount, totalSupply(tokenId));
+    }
+
     /// @notice Gets the token ID that was just minted
     /// @dev It returns the last tokenId that was minted on the positionManager,
     ///      not necessarily the last tokenId that was sent to this contract.

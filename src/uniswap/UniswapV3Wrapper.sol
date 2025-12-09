@@ -141,6 +141,59 @@ contract UniswapV3Wrapper is ERC721WrapperBase {
         return proportionalShare(amount0InUnitOfAccount + amount1InUnitOfAccount, amount, totalSupply(tokenId));
     }
 
+    struct PositionInfo {
+        int24 tickLower;
+        int24 tickUpper;
+        uint128 liquidity;
+        uint256 feeGrowthInside0LastX128;
+        uint256 feeGrowthInside1LastX128;
+        uint128 tokensOwed0;
+        uint128 tokensOwed1;
+    }
+
+    function previewUnwrap(uint256 tokenId, uint160 sqrtRatioX96, uint256 unwrapAmount)
+        public
+        view
+        returns (uint256 amount0, uint256 amount1)
+    {
+        PositionInfo memory position;
+        (
+            ,,,,,
+            position.tickLower,
+            position.tickUpper,
+            position.liquidity,
+            position.feeGrowthInside0LastX128,
+            position.feeGrowthInside1LastX128,
+            position.tokensOwed0,
+            position.tokensOwed1
+        ) = INonfungiblePositionManager(address(underlying)).positions(tokenId);
+
+        uint256 totalSupplyOfTokenId = totalSupply(tokenId);
+
+        // principal amount but only corresponding to the unwrap amount
+        (amount0, amount1) = UniswapPositionValueHelper.principal(
+            sqrtRatioX96,
+            position.tickLower,
+            position.tickUpper,
+            proportionalShare(uint256(position.liquidity), unwrapAmount, totalSupplyOfTokenId).toUint128()
+        );
+
+        (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128) =
+            _getFeeGrowthInside(position.tickLower, position.tickUpper);
+        // fees that are not accounted for yet for the entire tokenId
+        (uint256 pendingFees0, uint256 pendingFees1) = UniswapPositionValueHelper.feesOwed(
+            feeGrowthInside0X128,
+            feeGrowthInside1X128,
+            position.feeGrowthInside0LastX128,
+            position.feeGrowthInside1LastX128,
+            position.liquidity
+        );
+
+        // we take the proportional share of the pending fees and the tokens owed + principal
+        amount0 += proportionalShare(pendingFees0 + position.tokensOwed0, unwrapAmount, totalSupplyOfTokenId);
+        amount1 += proportionalShare(pendingFees1 + position.tokensOwed1, unwrapAmount, totalSupplyOfTokenId);
+    }
+
     function _totalPositionValue(uint160 sqrtRatioX96, uint256 tokenId)
         internal
         view

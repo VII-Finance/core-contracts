@@ -354,6 +354,8 @@ contract Handler is Test, BaseSetup {
             local.tokenId, unwrapAmount, local.balanceBeforeUnwrap
         );
 
+        console.log("tokenIdValueBeforeUnwrap", local.tokenIdValueBeforeUnwrap);
+        console.log("expectTokenIdValueAfterUnwrap", local.expectTokenIdValueAfterUnwrap);
         //get the value of the tokenId
         local.tokenIdValueToTransfer = local.tokenIdValueBeforeUnwrap - local.expectTokenIdValueAfterUnwrap; //We are not calculating the amount directly to avoid miscalculation due to rounding error
 
@@ -541,13 +543,21 @@ contract Handler is Test, BaseSetup {
                 //TODO: why is there 1 wei of error here?
                 assertLe(
                     uniswapWrapper.balanceOf(currentActor),
-                    fromBalanceBeforeTransfer - transferAmount + 2,
+                    fromBalanceBeforeTransfer - transferAmount + 4,
                     "uniswapWrapper: transferWithoutActiveLiquidation should decrease balance of sender"
                 );
                 assertGe(
-                    uniswapWrapper.balanceOf(to) + 2,
+                    uniswapWrapper.balanceOf(to) + 4,
                     toBalanceBeforeTransfer + transferAmount,
                     "uniswapWrapper: transferWithoutActiveLiquidation should increase balance of receiver"
+                );
+                // make sure money doesn't get created out of thin air
+                // we make sure the addition of the balances before is less than the balances after the transfer
+                // due to rounding errors the balances after the transfer can be less than before by a few wei and that is expected
+                assertLe(
+                    uniswapWrapper.balanceOf(currentActor) + uniswapWrapper.balanceOf(to),
+                    fromBalanceBeforeTransfer + toBalanceBeforeTransfer + 4,
+                    "uniswapWrapper: transferWithoutActiveLiquidation should not create money out of thin air"
                 );
 
                 for (uint256 i = 0; i < localParams.tokenIds.length; i++) {

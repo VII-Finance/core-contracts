@@ -116,7 +116,8 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
         {
             // Here we are using the pool's spot price to calculate how much the liquidity is worth in underlying tokens
-            PositionState memory positionState = _getPositionState(tokenId, true);
+            (uint160 sqrtRatioX96,,,) = poolManager.getSlot0(poolId);
+            PositionState memory positionState = _getPositionState(tokenId, sqrtRatioX96);
             uint128 liquidityToRemove =
                 proportionalShare(positionState.liquidity, amount, totalSupplyOfTokenId).toUint128();
             (amount0, amount1) = _principal(positionState, liquidityToRemove);
@@ -159,14 +160,15 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
     /// @param amount The proportion of the position to value
     /// @return the proportional value of the specified position in unit of account
     function calculateValueOfTokenId(uint256 tokenId, uint256 amount) public view override returns (uint256) {
-        PositionState memory positionState = _getPositionState(tokenId, false);
+        uint160 sqrtRatioX96 =
+            getSqrtRatioX96(_getCurrencyAddress(currency0), _getCurrencyAddress(currency1), unit0, unit1);
 
-        (uint256 amount0, uint256 amount1) = _total(positionState, tokenId);
+        (uint256 amount0, uint256 amount1) = previewUnwrap(tokenId, sqrtRatioX96, amount);
 
         uint256 amount0InUnitOfAccount = getQuote(amount0, _getCurrencyAddress(currency0));
         uint256 amount1InUnitOfAccount = getQuote(amount1, _getCurrencyAddress(currency1));
 
-        return proportionalShare(amount0InUnitOfAccount + amount1InUnitOfAccount, amount, totalSupply(tokenId));
+        return amount0InUnitOfAccount + amount1InUnitOfAccount;
     }
 
     function previewUnwrap(uint256 tokenId, uint160 sqrtRatioX96, uint256 unwrapAmount)
@@ -174,8 +176,7 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         view
         returns (uint256 amount0, uint256 amount1)
     {
-        PositionState memory positionState = _getPositionState(tokenId, false);
-        positionState.sqrtRatioX96 = sqrtRatioX96;
+        PositionState memory positionState = _getPositionState(tokenId, sqrtRatioX96);
 
         uint256 totalSupplyOfTokenId = totalSupply(tokenId);
 
@@ -201,9 +202,9 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
     /// @notice Gets the current state of a position
     /// @param tokenId The position token ID
-    /// @param shouldUseSpotPrice If true, uses the current pool spot price; if false, uses the oracle price
+    /// @param sqrtRatioX96 The sqrt price ratio to use for calculations
     /// @return positionState The complete position state
-    function _getPositionState(uint256 tokenId, bool shouldUseSpotPrice)
+    function _getPositionState(uint256 tokenId, uint160 sqrtRatioX96)
         internal
         view
         returns (PositionState memory positionState)
@@ -212,13 +213,6 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         (uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128) = poolManager.getPositionInfo(
             poolId, address(underlying), position.tickLower(), position.tickUpper(), bytes32(tokenId)
         );
-
-        uint160 sqrtRatioX96;
-        if (shouldUseSpotPrice) {
-            (sqrtRatioX96,,,) = poolManager.getSlot0(poolId);
-        } else {
-            sqrtRatioX96 = getSqrtRatioX96(_getCurrencyAddress(currency0), _getCurrencyAddress(currency1), unit0, unit1);
-        }
 
         positionState = PositionState({
             position: position,

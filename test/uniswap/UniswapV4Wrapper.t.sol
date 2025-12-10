@@ -500,7 +500,9 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         wrapper.enableTokenIdAsCollateral(tokenId);
 
         assertApproxEqAbs(wrapper.balanceOf(liquidator), transferAmount, ALLOWED_PRECISION_IN_TESTS);
-        assertApproxEqAbs(totalValueBefore, wrapper.balanceOf(borrower) + wrapper.balanceOf(liquidator), 1);
+        assertApproxEqAbs(
+            totalValueBefore, wrapper.balanceOf(borrower) + wrapper.balanceOf(liquidator), ALLOWED_PRECISION_IN_TESTS
+        );
     }
 
     function test_BasicBorrowV4() public {

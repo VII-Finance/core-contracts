@@ -33,10 +33,6 @@ contract UniswapV3Vault is BaseVault {
         (sqrtPriceX96,,,,,,) = pool.slot0();
     }
 
-    function assetsReceiver() internal view override returns (address) {
-        return address(this);
-    }
-
     function _mintPosition(uint256 token0Amount, uint256 token1Amount, uint128)
         internal
         override
@@ -57,5 +53,19 @@ contract UniswapV3Vault is BaseVault {
         });
 
         (tokenId,,,) = INonfungiblePositionManager(address(positionManager)).mint(params);
+    }
+
+    function _increaseLiquidity(uint256 token0Amount, uint256 token1Amount, uint128) internal override {
+        INonfungiblePositionManager.IncreaseLiquidityParams memory params =
+            INonfungiblePositionManager.IncreaseLiquidityParams({
+                tokenId: tokenId,
+                amount0Desired: token0Amount,
+                amount1Desired: token1Amount,
+                amount0Min: token0Amount - 1,
+                amount1Min: token1Amount - 1,
+                deadline: block.timestamp
+            });
+
+        INonfungiblePositionManager(address(positionManager)).increaseLiquidity(params);
     }
 }

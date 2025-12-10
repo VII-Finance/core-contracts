@@ -14,6 +14,7 @@ abstract contract BaseVaultTest is UniswapBaseTest {
     BaseVault public vault;
 
     address initializer = makeAddr("initializer");
+    address depositor = makeAddr("depositor");
     uint256 initialAmount;
 
     function setUp() public virtual override {
@@ -35,5 +36,14 @@ abstract contract BaseVaultTest is UniswapBaseTest {
     function test_totalAssets() public {
         test_initiate_vault();
         console.log("total assets after init", vault.totalAssets());
+    }
+
+    function test_deposit() public {
+        test_initiate_vault();
+
+        startHoax(depositor);
+        deal(vault.asset(), depositor, initialAmount);
+        IERC20(vault.asset()).forceApprove(address(vault), type(uint256).max);
+        vault.deposit(initialAmount, depositor);
     }
 }

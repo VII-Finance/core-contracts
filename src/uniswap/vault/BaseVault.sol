@@ -24,11 +24,15 @@ interface IPreviewUnwrap {
         external
         view
         returns (uint256 amount0, uint256 amount1);
+
+    function unwrap(address from, uint256 tokenId, address to) external;
 }
 
 abstract contract BaseVault is ERC4626, EVCUtil {
     using SafeERC20 for IERC20;
     using Math for uint256;
+    uint256 public constant FULL_AMOUNT = 1e36;
+
     IERC721WrapperBase public immutable wrapper;
 
     address public immutable borrowToken;
@@ -44,6 +48,7 @@ abstract contract BaseVault is ERC4626, EVCUtil {
     error AssetNotAssociatedWithWrapper();
     error NotSelfCallingThroughEVC();
     error VaultAlreadyInitialized();
+    error NotAllowedIfLiquidated();
 
     constructor(IERC721WrapperBase _wrapper, IERC20 _asset, IEVault _borrowVault)
         ERC20("VII Vault", "VII")
@@ -74,11 +79,11 @@ abstract contract BaseVault is ERC4626, EVCUtil {
 
         tickLower = TickMath.minUsableTick(10);
         tickUpper = TickMath.maxUsableTick(10);
+
+        positionManager.setApprovalForAll(address(wrapper), true);
     }
 
     function _getTokens(address _wrapper) public view virtual returns (address, address);
-
-    function assetsReceiver() internal view virtual returns (address);
 
     // this function will take the tokens from the user and do everything needed but keep the shares.
     // the initial amount should be less than the minimum.
@@ -89,7 +94,7 @@ abstract contract BaseVault is ERC4626, EVCUtil {
             revert VaultAlreadyInitialized();
         }
 
-        IERC20(asset()).safeTransferFrom(_msgSender(), assetsReceiver(), assetAmount);
+        IERC20(asset()).safeTransferFrom(_msgSender(), address(this), assetAmount);
 
         bool isTokenBeingBorrowedToken0_ = isTokenBeingBorrowedToken0();
         //calculate the debt to borrow. should be the same in USD value as the assetAmount
@@ -103,7 +108,7 @@ abstract contract BaseVault is ERC4626, EVCUtil {
             targetContract: address(borrowVault),
             onBehalfOfAccount: address(this),
             value: 0,
-            data: abi.encodeWithSelector(IEVault.borrow.selector, debtAmount, assetsReceiver())
+            data: abi.encodeWithSelector(IEVault.borrow.selector, debtAmount, address(this))
         });
 
         uint256 token0Amount = isTokenBeingBorrowedToken0_ ? debtAmount : assetAmount;
@@ -176,6 +181,54 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         _;
     }
 
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
+        super._deposit(caller, receiver, assets, shares);
+
+        if (IERC6909(address(wrapper)).balanceOf(address(this), tokenId) != FULL_AMOUNT) {
+            revert NotAllowedIfLiquidated();
+        }
+
+        bool isTokenBeingBorrowedToken0_ = isTokenBeingBorrowedToken0();
+        //calculate the debt to borrow. should be the same in USD value as the assetAmount
+        //we can enforce this by getting the current price in USD from the wrapper and make sure
+        //it is within respectable bounds
+        (uint256 debtAmount, uint128 liquidity) = getDebtAmount(assets);
+
+        IEVC.BatchItem[] memory batchItems = new IEVC.BatchItem[](3);
+
+        batchItems[0] = IEVC.BatchItem({
+            targetContract: address(borrowVault),
+            onBehalfOfAccount: address(this),
+            value: 0,
+            data: abi.encodeWithSelector(IEVault.borrow.selector, debtAmount, address(this))
+        });
+
+        batchItems[1] = IEVC.BatchItem({
+            targetContract: address(wrapper),
+            onBehalfOfAccount: address(this),
+            value: 0,
+            data: abi.encodeWithSelector(IPreviewUnwrap.unwrap.selector, address(this), tokenId, address(this))
+        });
+
+        uint256 token0Amount = isTokenBeingBorrowedToken0_ ? debtAmount : assets;
+        uint256 token1Amount = isTokenBeingBorrowedToken0_ ? assets : debtAmount;
+
+        //the act of wrapping the tokenId back should happen in the increaseLiquidity function
+        batchItems[2] = IEVC.BatchItem({
+            targetContract: address(this),
+            onBehalfOfAccount: address(this),
+            value: 0,
+            data: abi.encodeWithSelector(this.increaseLiquidity.selector, token0Amount, token1Amount, liquidity)
+        });
+
+        evc.batch(batchItems);
+    }
+
+    function increaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) external onlySelfCallFromEVC {
+        _increaseLiquidity(token0, token1, liquidity);
+        wrapper.wrap(tokenId, address(this));
+    }
+
     function mintPosition(uint256 token0, uint256 token1, uint128 liquidity) external onlySelfCallFromEVC {
         //mint the position using the wrapper
         tokenId = _mintPosition(token0, token1, liquidity);
@@ -186,6 +239,8 @@ abstract contract BaseVault is ERC4626, EVCUtil {
 
     //mintPosition return the tokenId and send that tokenId to the wrapper contract to be skimmed
     function _mintPosition(uint256 token0, uint256 token1, uint128 liquidity) internal virtual returns (uint256);
+
+    function _increaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) internal virtual;
 
     function getCurrentSqrtPriceX96() public view virtual returns (uint160);
 

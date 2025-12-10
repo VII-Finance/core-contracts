@@ -62,37 +62,52 @@ contract UniswapV4Vault is BaseVault {
         (sqrtPriceX96,,,) = poolManager.getSlot0(poolKey.toId());
     }
 
-    function assetsReceiver() internal view override returns (address) {
-        return asset() == weth ? address(this) : address(positionManager);
-    }
-
+    // TODO: gas can be saved here by directly sending the tokens to the position manager
     function _mintPosition(uint256 token0Amount, uint256 token1Amount, uint128 liquidity)
         internal
         override
         returns (uint256 tokenId)
     {
         tokenId = IPositionManager(address(positionManager)).nextTokenId();
+
+        bytes memory actionData = abi.encode(
+            poolKey, tickLower, tickUpper, liquidity, token0Amount + 1, token1Amount + 1, address(wrapper), ""
+        );
+
+        _callModifyLiquidity(uint8(Actions.MINT_POSITION), actionData, token0Amount, token1Amount);
+    }
+
+    function _increaseLiquidity(uint256 token0Amount, uint256 token1Amount, uint128 liquidity) internal override {
+        bytes memory actionData = abi.encode(tokenId, liquidity, token0Amount + 1, token1Amount + 1, "");
+        _callModifyLiquidity(uint8(Actions.INCREASE_LIQUIDITY), actionData, token0Amount, token1Amount);
+    }
+
+    function _callModifyLiquidity(
+        uint8 actionType, // either Actions.MINT_POSITION or Actions.INCREASE_LIQUIDITY
+        bytes memory actionData, // encoded params for first action
+        uint256 token0Amount,
+        uint256 token1Amount
+    ) internal {
         bytes memory actions = new bytes(5);
-        actions[0] = bytes1(uint8(Actions.MINT_POSITION));
-        actions[1] = bytes1(uint8(Actions.SETTLE)); //necessary because we don't want funds to be pulled through permit2
+        actions[0] = bytes1(actionType);
+        actions[1] = bytes1(uint8(Actions.SETTLE));
         actions[2] = bytes1(uint8(Actions.SETTLE));
         actions[3] = bytes1(uint8(Actions.SWEEP));
         actions[4] = bytes1(uint8(Actions.SWEEP));
 
         bytes[] memory params = new bytes[](5);
-        params[0] = abi.encode(
-            poolKey, tickLower, tickUpper, liquidity, token0Amount + 1, token1Amount + 1, address(wrapper), ""
-        );
-        params[1] = abi.encode(poolKey.currency0, ActionConstants.OPEN_DELTA, false); //whatever is the open delta will be settled and the payer will be the position manager itself
+        params[0] = actionData;
+        params[1] = abi.encode(poolKey.currency0, ActionConstants.OPEN_DELTA, false);
         params[2] = abi.encode(poolKey.currency1, ActionConstants.OPEN_DELTA, false);
-
-        params[3] = abi.encode(poolKey.currency0, _msgSender()); //if there is remaining amount of currency0, it will be swept to the user
+        params[3] = abi.encode(poolKey.currency0, _msgSender());
         params[4] = abi.encode(poolKey.currency1, _msgSender());
 
         if (poolKey.currency0.isAddressZero()) {
             IWETH9(weth).withdraw(token0Amount);
-            poolKey.currency1.transfer(address(positionManager), token1Amount);
+        } else {
+            poolKey.currency0.transfer(address(positionManager), token0Amount);
         }
+        poolKey.currency1.transfer(address(positionManager), token1Amount);
 
         IPositionManager(address(positionManager)).modifyLiquidities{value: address(this).balance}(
             abi.encode(actions, params), block.timestamp

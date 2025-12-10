@@ -133,42 +133,65 @@ contract UniswapV3Wrapper is ERC721WrapperBase {
     function calculateValueOfTokenId(uint256 tokenId, uint256 amount) public view override returns (uint256) {
         uint160 sqrtRatioX96 = getSqrtRatioX96(token0, token1, unit0, unit1);
 
-        (uint256 amount0, uint256 amount1) = _totalPositionValue(sqrtRatioX96, tokenId);
+        (uint256 amount0, uint256 amount1) = previewUnwrap(tokenId, sqrtRatioX96, amount);
 
         uint256 amount0InUnitOfAccount = getQuote(amount0, token0);
         uint256 amount1InUnitOfAccount = getQuote(amount1, token1);
 
-        return proportionalShare(amount0InUnitOfAccount + amount1InUnitOfAccount, amount, totalSupply(tokenId));
+        return amount0InUnitOfAccount + amount1InUnitOfAccount;
     }
 
-    function _totalPositionValue(uint160 sqrtRatioX96, uint256 tokenId)
-        internal
+    struct PositionInfo {
+        int24 tickLower;
+        int24 tickUpper;
+        uint128 liquidity;
+        uint256 feeGrowthInside0LastX128;
+        uint256 feeGrowthInside1LastX128;
+        uint128 tokensOwed0;
+        uint128 tokensOwed1;
+    }
+
+    function previewUnwrap(uint256 tokenId, uint160 sqrtRatioX96, uint256 unwrapAmount)
+        public
         view
-        returns (uint256 amount0Total, uint256 amount1Total)
+        returns (uint256 amount0, uint256 amount1)
     {
+        PositionInfo memory position;
         (
             ,,,,,
-            int24 tickLower,
-            int24 tickUpper,
-            uint128 liquidity,
-            uint256 feeGrowthInside0LastX128,
-            uint256 feeGrowthInside1LastX128,
-            uint128 tokensOwed0,
-            uint128 tokensOwed1
+            position.tickLower,
+            position.tickUpper,
+            position.liquidity,
+            position.feeGrowthInside0LastX128,
+            position.feeGrowthInside1LastX128,
+            position.tokensOwed0,
+            position.tokensOwed1
         ) = INonfungiblePositionManager(address(underlying)).positions(tokenId);
 
-        (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128) = _getFeeGrowthInside(tickLower, tickUpper);
+        uint256 totalSupplyOfTokenId = totalSupply(tokenId);
 
-        (uint256 amount0Principal, uint256 amount1Principal) =
-            UniswapPositionValueHelper.principal(sqrtRatioX96, tickLower, tickUpper, liquidity);
-
-        //fees that are not accounted for yet
-        (uint256 feesOwed0, uint256 feesOwed1) = UniswapPositionValueHelper.feesOwed(
-            feeGrowthInside0X128, feeGrowthInside1X128, feeGrowthInside0LastX128, feeGrowthInside1LastX128, liquidity
+        // principal amount but only corresponding to the unwrap amount
+        (amount0, amount1) = UniswapPositionValueHelper.principal(
+            sqrtRatioX96,
+            position.tickLower,
+            position.tickUpper,
+            proportionalShare(uint256(position.liquidity), unwrapAmount, totalSupplyOfTokenId).toUint128()
         );
 
-        amount0Total = amount0Principal + feesOwed0 + tokensOwed0;
-        amount1Total = amount1Principal + feesOwed1 + tokensOwed1;
+        (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128) =
+            _getFeeGrowthInside(position.tickLower, position.tickUpper);
+        // fees that are not accounted for yet for the entire tokenId
+        (uint256 pendingFees0, uint256 pendingFees1) = UniswapPositionValueHelper.feesOwed(
+            feeGrowthInside0X128,
+            feeGrowthInside1X128,
+            position.feeGrowthInside0LastX128,
+            position.feeGrowthInside1LastX128,
+            position.liquidity
+        );
+
+        // we take the proportional share of the pending fees and the tokens owed + principal
+        amount0 += proportionalShare(pendingFees0 + position.tokensOwed0, unwrapAmount, totalSupplyOfTokenId);
+        amount1 += proportionalShare(pendingFees1 + position.tokensOwed1, unwrapAmount, totalSupplyOfTokenId);
     }
 
     function _getFeeGrowthInside(int24 tickLower, int24 tickUpper)

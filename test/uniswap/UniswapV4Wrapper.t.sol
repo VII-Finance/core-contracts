@@ -325,14 +325,21 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         uint256 amount0InUnitOfAccount = wrapper.getQuote(amount0Spent, address(token0));
         uint256 amount1InUnitOfAccount = wrapper.getQuote(amount1Spent, address(token1));
 
-        uint256 expectedBalance = (amount0InUnitOfAccount + amount1InUnitOfAccount);
+        {
+            uint256 expectedBalance = (amount0InUnitOfAccount + amount1InUnitOfAccount);
 
-        assertApproxEqAbs(wrapper.balanceOf(borrower), expectedBalance, ALLOWED_PRECISION_IN_TESTS);
+            assertApproxEqAbs(wrapper.balanceOf(borrower), expectedBalance, ALLOWED_PRECISION_IN_TESTS);
+        }
 
         uint256 amount0BalanceBefore = poolKey.currency0.balanceOf(borrower);
         uint256 amount1BalanceBefore = poolKey.currency1.balanceOf(borrower);
 
         //unwrap to get the underlying tokens back
+
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+
+        (uint256 previewUnwrapAmount0, uint256 previewUnwrapAmount1) =
+            UniswapV4Wrapper(payable(address(wrapper))).previewUnwrap(tokenId, sqrtPriceX96, wrapper.FULL_AMOUNT());
 
         wrapper.unwrap(
             borrower,
@@ -345,6 +352,10 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
                 block.timestamp
             )
         );
+
+        assertEq(poolKey.currency0.balanceOf(borrower), amount0BalanceBefore + previewUnwrapAmount0);
+        assertEq(poolKey.currency1.balanceOf(borrower), amount1BalanceBefore + previewUnwrapAmount1);
+
         assertEq(wrapper.balanceOf(borrower, tokenId), 0);
 
         assertApproxEqAbs(poolKey.currency0.balanceOf(borrower), amount0BalanceBefore + amount0Spent, 1);
@@ -489,7 +500,9 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         wrapper.enableTokenIdAsCollateral(tokenId);
 
         assertApproxEqAbs(wrapper.balanceOf(liquidator), transferAmount, ALLOWED_PRECISION_IN_TESTS);
-        assertApproxEqAbs(totalValueBefore, wrapper.balanceOf(borrower) + wrapper.balanceOf(liquidator), 1);
+        assertApproxEqAbs(
+            totalValueBefore, wrapper.balanceOf(borrower) + wrapper.balanceOf(liquidator), ALLOWED_PRECISION_IN_TESTS
+        );
     }
 
     function test_BasicBorrowV4() public {

@@ -439,4 +439,12 @@ contract BaseSetup is Test, Fuzzers {
             );
         }
     }
+
+    function getCurrentPriceX96(bool isV3) internal view returns (uint160 sqrtPriceX96) {
+        if (isV3) {
+            (sqrtPriceX96,,,,,,) = uniswapV3Wrapper.pool().slot0();
+        } else {
+            (sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+        }
+    }
 }

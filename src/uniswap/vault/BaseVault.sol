@@ -16,7 +16,15 @@ import {EVCUtil} from "lib/ethereum-vault-connector/src/utils/EVCUtil.sol";
 import {IEVCUtil} from "src/interfaces/IEVCUtil.sol";
 import {IEVault} from "lib/euler-interfaces/interfaces/IEVault.sol";
 import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import {IERC6909} from "lib/openzeppelin-contracts/contracts/interfaces/IERC6909.sol";
 import {console} from "lib/forge-std/src/console.sol";
+
+interface IPreviewUnwrap{
+    function previewUnwrap(uint256 tokenId, uint160 sqrtRatioX96, uint256 unwrapAmount)
+        external
+        view
+        returns (uint256 amount0, uint256 amount1);
+}
 
 abstract contract BaseVault is ERC4626, EVCUtil {
     using SafeERC20 for IERC20;
@@ -123,22 +131,15 @@ abstract contract BaseVault is ERC4626, EVCUtil {
 
         //we need to get how much amount0 and amount1 the underlying token is worth.
         //The plan is to do the calculations here in this contract instead of doing an external call
-        (uint256 amount0, uint256 amount1) = calculateAmounts(tokenId);
-        
         uint256 currentPrice = getCurrentSqrtPriceX96();
+        (uint256 amount0, uint256 amount1) = IPreviewUnwrap(address(wrapper)).previewUnwrap(tokenId, uint160(currentPrice), IERC6909(address(wrapper)).balanceOf( address(this), tokenId));
+        
         int256 priceIn18Decimals = (int256(currentPrice) * int256(currentPrice) * 1e18) >> (96 * 2);
 
         uint256 borrowedAmount = borrowVault.debtOf(address(this));
 
         int256 effectiveBorrowTokenAmount =
             int256(isTokenBeingBorrowedToken0() ? amount0 : amount1) - int256(borrowedAmount);
-        
-        console.log("effective borrow token amount", effectiveBorrowTokenAmount);
-        console.log("borrowed amount", borrowedAmount);
-        console.log("amount0", amount0);
-        console.log("amount1", amount1);
-        console.log("price in 18 decimals", priceIn18Decimals);
-        console.log("is token0 being borrowed", isTokenBeingBorrowedToken0());
         
         // we need to convert borrow amount to asset amount using current price
         int256 effectiveBorrowAmountInAsset = isTokenBeingBorrowedToken0()

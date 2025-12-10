@@ -58,7 +58,4 @@ contract UniswapV3Vault is BaseVault {
 
         (tokenId,,,) = INonfungiblePositionManager(address(positionManager)).mint(params);
     }
-
-    function calculateAmounts(uint256 tokenId) public view override returns (uint256, uint256) {
-    }
 }

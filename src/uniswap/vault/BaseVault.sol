@@ -19,7 +19,7 @@ import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {IERC6909} from "lib/openzeppelin-contracts/contracts/interfaces/IERC6909.sol";
 import {console} from "lib/forge-std/src/console.sol";
 
-interface IPreviewUnwrap{
+interface IPreviewUnwrap {
     function previewUnwrap(uint256 tokenId, uint160 sqrtRatioX96, uint256 unwrapAmount)
         external
         view
@@ -121,8 +121,6 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         //we need to mint some initial tokens to zero address
     }
 
-    function calculateAmounts(uint256 tokenId) public view virtual returns (uint256, uint256);
-
     // totalAssets, we need to get the total eth that the underlying position holds and get stablecoin amount as well
     // convert the stablecoing amount - debt into eth amount using the current price. Then add the eth amount to get totalAssets
     // how do we use the sqrtPriceX96 to convert amounts?
@@ -132,23 +130,26 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         //we need to get how much amount0 and amount1 the underlying token is worth.
         //The plan is to do the calculations here in this contract instead of doing an external call
         uint256 currentPrice = getCurrentSqrtPriceX96();
-        (uint256 amount0, uint256 amount1) = IPreviewUnwrap(address(wrapper)).previewUnwrap(tokenId, uint160(currentPrice), IERC6909(address(wrapper)).balanceOf( address(this), tokenId));
-        
+        (uint256 amount0, uint256 amount1) = IPreviewUnwrap(address(wrapper))
+            .previewUnwrap(tokenId, uint160(currentPrice), IERC6909(address(wrapper)).balanceOf(address(this), tokenId));
+
         int256 priceIn18Decimals = (int256(currentPrice) * int256(currentPrice) * 1e18) >> (96 * 2);
 
         uint256 borrowedAmount = borrowVault.debtOf(address(this));
 
         int256 effectiveBorrowTokenAmount =
             int256(isTokenBeingBorrowedToken0() ? amount0 : amount1) - int256(borrowedAmount);
-        
+
         // we need to convert borrow amount to asset amount using current price
         int256 effectiveBorrowAmountInAsset = isTokenBeingBorrowedToken0()
             ? ((effectiveBorrowTokenAmount) * 1e18) / priceIn18Decimals
             : ((effectiveBorrowTokenAmount) * priceIn18Decimals) / 1e18;
-        
-        return uint256(isTokenBeingBorrowedToken0()
-            ? int256(amount1) + effectiveBorrowAmountInAsset
-            : int256(amount0) + effectiveBorrowAmountInAsset);
+
+        return uint256(
+            isTokenBeingBorrowedToken0()
+                ? int256(amount1) + effectiveBorrowAmountInAsset
+                : int256(amount0) + effectiveBorrowAmountInAsset
+        );
     }
 
     function getDebtAmount(uint256 assets) public view returns (uint256 debtAmount, uint128 liquidity) {

@@ -99,9 +99,5 @@ contract UniswapV4Vault is BaseVault {
         );
     }
 
-    function calculateAmounts(uint256 tokenId) public view override returns (uint256, uint256) {
-    }
-
-
     receive() external payable {}
 }

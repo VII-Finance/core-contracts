@@ -32,7 +32,7 @@ abstract contract BaseVaultTest is UniswapBaseTest {
         vault.initializeVault(initialAmount);
     }
 
-    function test_totalAssets() public{
+    function test_totalAssets() public {
         test_initiate_vault();
         console.log("total assets after init", vault.totalAssets());
     }

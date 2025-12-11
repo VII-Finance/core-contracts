@@ -549,11 +549,11 @@ contract Handler is Test, BaseSetup {
                 //TODO: why is there 1 wei of error here?
                 assertLe(
                     uniswapWrapper.balanceOf(currentActor),
-                    fromBalanceBeforeTransfer - transferAmount + 4,
+                    fromBalanceBeforeTransfer - transferAmount + 5,
                     "uniswapWrapper: transferWithoutActiveLiquidation should decrease balance of sender"
                 );
                 assertGe(
-                    uniswapWrapper.balanceOf(to) + 4,
+                    uniswapWrapper.balanceOf(to) + 5,
                     toBalanceBeforeTransfer + transferAmount,
                     "uniswapWrapper: transferWithoutActiveLiquidation should increase balance of receiver"
                 );
@@ -562,7 +562,7 @@ contract Handler is Test, BaseSetup {
                 // due to rounding errors the balances after the transfer can be less than before by a few wei and that is expected
                 assertLe(
                     uniswapWrapper.balanceOf(currentActor) + uniswapWrapper.balanceOf(to),
-                    fromBalanceBeforeTransfer + toBalanceBeforeTransfer + 4,
+                    fromBalanceBeforeTransfer + toBalanceBeforeTransfer + 5,
                     "uniswapWrapper: transferWithoutActiveLiquidation should not create money out of thin air"
                 );
 

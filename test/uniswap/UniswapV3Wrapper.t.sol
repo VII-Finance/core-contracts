@@ -403,7 +403,7 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
         wrapper.enableTokenIdAsCollateral(tokenId);
 
         assertApproxEqAbs(wrapper.balanceOf(liquidator), transferAmount, ALLOWED_PRECISION_IN_TESTS);
-        assertApproxEqRel(
+        assertApproxEqAbs(
             totalValueBefore, wrapper.balanceOf(borrower) + wrapper.balanceOf(liquidator), ALLOWED_PRECISION_IN_TESTS
         );
     }

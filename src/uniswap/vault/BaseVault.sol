@@ -151,19 +151,19 @@ abstract contract BaseVault is ERC4626, EVCUtil {
 
         uint256 borrowedAmount = borrowVault.debtOf(address(this));
 
-        int256 effectiveBorrowTokenAmount =
-            int256(isTokenBeingBorrowedToken0() ? amount0 : amount1) - int256(borrowedAmount);
+        int256 effectiveBorrowTokenAmount = int256(isTokenBeingBorrowedToken0() ? amount0 : amount1)
+            + int256(IERC20(borrowToken).balanceOf(address(this))) - int256(borrowedAmount);
 
         // we need to convert borrow amount to asset amount using current price
         int256 effectiveBorrowAmountInAsset = isTokenBeingBorrowedToken0()
             ? ((effectiveBorrowTokenAmount) * 1e18) / priceIn18Decimals
             : ((effectiveBorrowTokenAmount) * priceIn18Decimals) / 1e18;
 
-        return uint256(
-            isTokenBeingBorrowedToken0()
-                ? int256(amount1) + effectiveBorrowAmountInAsset
-                : int256(amount0) + effectiveBorrowAmountInAsset
-        );
+        return (uint256(
+                isTokenBeingBorrowedToken0()
+                    ? int256(amount1) + effectiveBorrowAmountInAsset
+                    : int256(amount0) + effectiveBorrowAmountInAsset
+            )) + IERC20(asset()).balanceOf(address(this));
     }
 
     function getDebtAmount(uint256 assets) public view returns (uint256 debtAmount, uint128 liquidity) {
@@ -300,6 +300,9 @@ abstract contract BaseVault is ERC4626, EVCUtil {
     function _increaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) internal virtual;
 
     function _decreaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) internal virtual;
+
+    // we have one type of rebalance the same as other liquidity manager. Where a priviledged address is allowed to change ticks
+    // another is where we adjust the debt of the protocol
 
     function getCurrentSqrtPriceX96() public view virtual returns (uint160);
 

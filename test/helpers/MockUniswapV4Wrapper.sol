@@ -60,13 +60,26 @@ contract MockUniswapV4Wrapper is UniswapV4Wrapper {
     }
 
     function pendingFees(uint256 tokenId) external view returns (uint256 fees0Owed, uint256 fees1Owed) {
-        PositionState memory positionState = _getPositionState(tokenId, true);
+        (uint160 sqrtRatioX96,,,) = poolManager.getSlot0(poolKey.toId());
+        PositionState memory positionState = _getPositionState(tokenId, sqrtRatioX96);
         return _pendingFees(positionState);
     }
 
     function total(uint256 tokenId) external view returns (uint256 amount0Total, uint256 amount1Total) {
-        PositionState memory positionState = _getPositionState(tokenId, true);
+        (uint160 sqrtRatioX96,,,) = poolManager.getSlot0(poolKey.toId());
+        PositionState memory positionState = _getPositionState(tokenId, sqrtRatioX96);
         return _total(positionState, tokenId);
+    }
+
+    struct Local {
+        uint160 sqrtRatioX96;
+        uint256 pendingFees0;
+        uint256 pendingFees1;
+        uint256 feesOwed0;
+        uint256 feesOwed1;
+        uint256 totalSupplyOfTokenId;
+        uint256 amount0;
+        uint256 amount1;
     }
 
     function calculateExactedValueOfTokenIdAfterUnwrap(
@@ -74,37 +87,52 @@ contract MockUniswapV4Wrapper is UniswapV4Wrapper {
         uint256 unwrapAmount,
         uint256 balanceBeforeUnwrap
     ) public view returns (uint256) {
-        PositionState memory positionState = _getPositionState(tokenId, true);
-        {
-            uint128 liquidityToRemove =
-                proportionalShare(positionState.liquidity, unwrapAmount, totalSupply(tokenId)).toUint128();
-
-            positionState.liquidity -= liquidityToRemove;
-        }
-
-        uint256 totalAmountInUnitOfAccount;
-
-        {
-            (uint256 amount0, uint256 amount1) = _principal(positionState);
-            (uint256 feesOwed0, uint256 feesOwed1) = _pendingFees(positionState);
-
-            uint256 feesOwed0FromEarlierPositions = tokensOwed[tokenId].fees0Owed
-                - proportionalShare(tokensOwed[tokenId].fees0Owed, unwrapAmount, totalSupply(tokenId));
-            uint256 feesOwed1FromEarlierPositions = tokensOwed[tokenId].fees1Owed
-                - proportionalShare(tokensOwed[tokenId].fees1Owed, unwrapAmount, totalSupply(tokenId));
-
-            totalAmountInUnitOfAccount = getQuote(
-                amount0 + feesOwed0 + feesOwed0FromEarlierPositions, _getCurrencyAddress(poolKey.currency0)
-            ) + getQuote(amount1 + feesOwed1 + feesOwed1FromEarlierPositions, _getCurrencyAddress(poolKey.currency1));
-        }
-
-        //avoid division by zero
+        // if unwrap amount is equal to current total supply, then value after unwrap is 0
         if (totalSupply(tokenId) == unwrapAmount) {
             return 0;
         }
-        return proportionalShare(
-            totalAmountInUnitOfAccount, balanceBeforeUnwrap - unwrapAmount, totalSupply(tokenId) - unwrapAmount
+
+        Local memory local;
+
+        // we first simulate what happens to the fees when partial unwrap is done
+        // we update the feesOwed so that after the unwrap we simply assume the pending fees are zero
+
+        (local.sqrtRatioX96,,,) = poolManager.getSlot0(poolKey.toId());
+        PositionState memory positionState = _getPositionState(tokenId, local.sqrtRatioX96);
+
+        (local.pendingFees0, local.pendingFees1) = _pendingFees(positionState);
+
+        local.feesOwed0 = tokensOwed[tokenId].fees0Owed;
+        local.feesOwed1 = tokensOwed[tokenId].fees1Owed;
+
+        local.feesOwed0 += local.pendingFees0
+        - proportionalShare(local.pendingFees0 + local.feesOwed0, unwrapAmount, totalSupply(tokenId));
+        local.feesOwed1 += local.pendingFees1
+        - proportionalShare(local.pendingFees1 + local.feesOwed1, unwrapAmount, totalSupply(tokenId));
+
+        // now we calculate the principal after the unwrap
+        positionState.liquidity -= proportionalShare(
+                uint256(positionState.liquidity), unwrapAmount, totalSupply(tokenId)
+            ).toUint128();
+
+        local.totalSupplyOfTokenId = totalSupply(tokenId) - unwrapAmount;
+
+        (local.amount0, local.amount1) = _principal(
+            positionState,
+            proportionalShare(
+                    uint256(positionState.liquidity), balanceBeforeUnwrap - unwrapAmount, local.totalSupplyOfTokenId
+                ).toUint128()
         );
+
+        local.amount0 += proportionalShare(
+            local.feesOwed0, balanceBeforeUnwrap - unwrapAmount, local.totalSupplyOfTokenId
+        );
+        local.amount1 += proportionalShare(
+            local.feesOwed1, balanceBeforeUnwrap - unwrapAmount, local.totalSupplyOfTokenId
+        );
+
+        return getQuote(local.amount0, _getCurrencyAddress(currency0))
+            + getQuote(local.amount1, _getCurrencyAddress(currency1));
     }
 
     //All of tests uses the spot price from the pool instead of the oracle

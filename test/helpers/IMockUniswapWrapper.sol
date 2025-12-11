@@ -25,4 +25,9 @@ interface IMockUniswapWrapper is IERC721WrapperBase, IERC6909TokenSupply {
         external
         view
         returns (uint160 sqrtRatioX96);
+
+    function previewUnwrap(uint256 tokenId, uint160 sqrtRatioX96, uint256 unwrapAmount)
+        external
+        view
+        returns (uint256 amount0, uint256 amount1);
 }

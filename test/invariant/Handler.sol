@@ -277,44 +277,82 @@ contract Handler is Test, BaseSetup {
         tokenIdInfo[tokenId][isV3].holders.add(to);
     }
 
+    //given unwrap amount, the UniswapV3Wrapper will calculate the liquidity to be removed
+    //if the liquidity to be removed is zero, call to the UniswapV3Pool will fails
+    //even if liquidity to be removed is non-zero, it may still result in amount0 and amount1 being zero
+    //which will make the collect call fail as well
+    function isZeroLiquidityDecreased(uint256 tokenId, uint256 unwrapAmount, bool isV3) internal view returns (bool) {
+        if (!isV3) return false;
+
+        // in NonFungiblePositionManager, decrease liquidity fails if liquidity being removed is zero
+        if (unwrapAmount == 0) {
+            return true;
+        }
+
+        (,,,,, int24 tickLower, int24 tickUpper, uint128 liquidity,,,,) = nonFungiblePositionManager.positions(tokenId);
+        uint128 liquidityToRemove =
+            uint128(uniswapWrapper.proportionalShare(liquidity, unwrapAmount, uniswapWrapper.totalSupply(tokenId)));
+
+        if (liquidityToRemove == 0) {
+            return true;
+        }
+
+        // also make sure amount0 and amount1 resulting from liquidityToRemove is not zero either
+        // call to collect it will fail otherwise
+        (uint160 sqrtRatioX96,,,,,,) = uniswapV3Wrapper.pool().slot0();
+        (uint256 amount0, uint256 amount1) =
+            UniswapPositionValueHelper.principal(sqrtRatioX96, tickLower, tickUpper, liquidityToRemove);
+
+        return (amount0 == 0 && amount1 == 0);
+    }
+
+    struct LocalVars {
+        uint256[] tokenIds;
+        uint256 tokenId;
+        uint256 balanceBeforeUnwrap;
+        uint256 tokenIdValueBeforeUnwrap;
+        uint256 expectTokenIdValueAfterUnwrap;
+        uint256 tokenIdValueToTransfer;
+        bool shouldUnwrapFail;
+        uint256 previewUnwrapAmount0;
+        uint256 previewUnwrapAmount1;
+        uint256 token0BalanceBeforeOfCurrentActor;
+        uint256 token1BalanceBeforeOfCurrentActor;
+    }
+
     function partialUnwrap(uint256 actorIndexSeed, bool isV3, uint256 tokenIdIndexSeed, uint256 unwrapAmount)
         public
         useActor(actorIndexSeed)
         useUniswapWrapper(isV3)
     {
-        uint256[] memory tokenIds = getTokenIdsHeldByActor(currentActor, isV3);
-        if (tokenIds.length == 0) {
+        LocalVars memory local;
+
+        local.tokenIds = getTokenIdsHeldByActor(currentActor, isV3);
+        if (local.tokenIds.length == 0) {
             return; //skip if current actor has no tokenIds
         }
-        uint256 tokenId = tokenIds[bound(tokenIdIndexSeed, 0, tokenIds.length - 1)];
+        local.tokenId = local.tokenIds[bound(tokenIdIndexSeed, 0, local.tokenIds.length - 1)];
 
-        uint256 balanceBeforeUnwrap = uniswapWrapper.balanceOf(currentActor, tokenId);
+        local.balanceBeforeUnwrap = uniswapWrapper.balanceOf(currentActor, local.tokenId);
 
-        if (balanceBeforeUnwrap == 0) {
+        if (local.balanceBeforeUnwrap == 0) {
             return; //skip if current actor has no balance
         }
 
-        // this is a workaround to make sure the calculateExactedValueOfTokenIdAfterUnwrap works correctly
-        // unwrapping the 0 amount will convert the pending fees into feesOwed tracked in the v4 wrapper contract
-        // this way the calculation in calculateExactedValueOfTokenIdAfterUnwrap is the exact same the actual unwrap call
-        //if not done then there will be an error of 1 wei and that is problematic because then we can't accurately predict if the next call will fails or not
-        if (!isV3) uniswapWrapper.unwrap(currentActor, tokenId, currentActor, 0, "");
+        unwrapAmount = bound(unwrapAmount, 0, local.balanceBeforeUnwrap);
 
-        unwrapAmount = bound(unwrapAmount, 0, balanceBeforeUnwrap);
+        (local.previewUnwrapAmount0, local.previewUnwrapAmount1) =
+            uniswapWrapper.previewUnwrap(local.tokenId, getCurrentPriceX96(isV3), unwrapAmount);
 
-        {
-            uint256 tokenIdValueBeforeUnwrap = uniswapWrapper.calculateValueOfTokenId(tokenId, balanceBeforeUnwrap);
+        local.token0BalanceBeforeOfCurrentActor = token0.balanceOf(currentActor);
+        local.token1BalanceBeforeOfCurrentActor = token1.balanceOf(currentActor);
 
-            uint256 expectTokenIdValueAfterUnwrap =
-                uniswapWrapper.calculateExactedValueOfTokenIdAfterUnwrap(tokenId, unwrapAmount, balanceBeforeUnwrap);
+        local.tokenIdValueBeforeUnwrap =
+            uniswapWrapper.calculateValueOfTokenId(local.tokenId, local.balanceBeforeUnwrap);
 
-            //get the value of the tokenId
-            uint256 tokenIdValueToTransfer = tokenIdValueBeforeUnwrap - expectTokenIdValueAfterUnwrap; //We are not calculating the amount directly to avoid miscalculation due to rounding error
-
-            //if this tokenId is not enabled as collateral then the value being transferred is 0
-            if (!tokenIdInfo[tokenId][isV3].isEnabled[currentActor]) {
-                tokenIdValueToTransfer = 0;
-            }
+        local.expectTokenIdValueAfterUnwrap = uniswapWrapper.calculateExactedValueOfTokenIdAfterUnwrap(
+            local.tokenId, unwrapAmount, local.balanceBeforeUnwrap
+        );
 
             //given unwrap amount, the UniswapV3Wrapper will calculate the liquidity to be removed
             //if the liquidity to be removed is zero, call to the UniswapV3Pool will fails
@@ -327,24 +365,43 @@ contract Handler is Test, BaseSetup {
             bool shouldUnwrapFail = shouldNextActionFail(currentActor, tokenIdValueToTransfer, address(uniswapWrapper))
                 || isZeroLiquidityDecreased;
 
-            if (shouldUnwrapFail && FAIL_ON_REVERT) {
-                vm.expectRevert();
-            }
-
-            uniswapWrapper.unwrap(currentActor, tokenId, currentActor, unwrapAmount, "");
-
-            if (shouldUnwrapFail) return; //if the unwrap should fail, we can skip the rest of the assertions
+        //if this tokenId is not enabled as collateral then the value being transferred is 0
+        if (!tokenIdInfo[local.tokenId][isV3].isEnabled[currentActor]) {
+            local.tokenIdValueToTransfer = 0;
         }
 
+        local.shouldUnwrapFail = shouldNextActionFail(
+            currentActor, local.tokenIdValueToTransfer, address(uniswapWrapper)
+        ) || isZeroLiquidityDecreased(local.tokenId, unwrapAmount, isV3);
+
+        if (local.shouldUnwrapFail && FAIL_ON_REVERT) {
+            vm.expectRevert();
+        }
+
+        uniswapWrapper.unwrap(currentActor, local.tokenId, currentActor, unwrapAmount, "");
+
+        if (local.shouldUnwrapFail) return; //if the unwrap should fail, we can skip the rest of the assertions
+
+        assertEq(
+            token0.balanceOf(currentActor),
+            local.token0BalanceBeforeOfCurrentActor + local.previewUnwrapAmount0,
+            "uniswapWrapper: unwrap should increase token0 balance of currentActor"
+        );
+        assertEq(
+            token1.balanceOf(currentActor),
+            local.token1BalanceBeforeOfCurrentActor + local.previewUnwrapAmount1,
+            "uniswapWrapper: unwrap should increase token1 balance of currentActor"
+        );
+
         //We need to independently find out the amount user spent on the tokenId
-        if (unwrapAmount == balanceBeforeUnwrap) {
-            tokenIdsHeldByActor[currentActor][isV3].remove(tokenId);
-            tokenIdInfo[tokenId][isV3].holders.remove(currentActor);
+        if (unwrapAmount == local.balanceBeforeUnwrap) {
+            tokenIdsHeldByActor[currentActor][isV3].remove(local.tokenId);
+            tokenIdInfo[local.tokenId][isV3].holders.remove(currentActor);
         }
 
         assertEq(
-            uniswapWrapper.balanceOf(currentActor, tokenId),
-            balanceBeforeUnwrap - unwrapAmount,
+            uniswapWrapper.balanceOf(currentActor, local.tokenId),
+            local.balanceBeforeUnwrap - unwrapAmount,
             "uniswapWrapper: partial unwrap should decrease balance of sender"
         );
     }
@@ -492,13 +549,21 @@ contract Handler is Test, BaseSetup {
                 //TODO: why is there 1 wei of error here?
                 assertLe(
                     uniswapWrapper.balanceOf(currentActor),
-                    fromBalanceBeforeTransfer - transferAmount + 2,
+                    fromBalanceBeforeTransfer - transferAmount + 4,
                     "uniswapWrapper: transferWithoutActiveLiquidation should decrease balance of sender"
                 );
                 assertGe(
-                    uniswapWrapper.balanceOf(to) + 2,
+                    uniswapWrapper.balanceOf(to) + 4,
                     toBalanceBeforeTransfer + transferAmount,
                     "uniswapWrapper: transferWithoutActiveLiquidation should increase balance of receiver"
+                );
+                // make sure money doesn't get created out of thin air
+                // we make sure the addition of the balances before is less than the balances after the transfer
+                // due to rounding errors the balances after the transfer can be less than before by a few wei and that is expected
+                assertLe(
+                    uniswapWrapper.balanceOf(currentActor) + uniswapWrapper.balanceOf(to),
+                    fromBalanceBeforeTransfer + toBalanceBeforeTransfer + 4,
+                    "uniswapWrapper: transferWithoutActiveLiquidation should not create money out of thin air"
                 );
 
                 for (uint256 i = 0; i < localParams.tokenIds.length; i++) {

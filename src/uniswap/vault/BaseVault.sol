@@ -17,6 +17,7 @@ import {IEVCUtil} from "src/interfaces/IEVCUtil.sol";
 import {IEVault} from "lib/euler-interfaces/interfaces/IEVault.sol";
 import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {IERC6909} from "lib/openzeppelin-contracts/contracts/interfaces/IERC6909.sol";
+import {IPermit2} from "lib/v4-periphery/lib/permit2/src/interfaces/IPermit2.sol";
 import {console} from "lib/forge-std/src/console.sol";
 
 interface IPreviewUnwrap {
@@ -72,6 +73,13 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         IERC20(token0).forceApprove(address(positionManager_), type(uint256).max);
         IERC20(token1).forceApprove(address(positionManager_), type(uint256).max);
 
+        // approve the permit2 contract. Euler vault will pull funds using that
+        // we can also approve the vault directly but the problem is that euler vault will first try to pull using permit2 anyway
+        // it fails and then it will try the normal transferFrom. It wastes gas so let's just approve the permit2
+        IPermit2 permit2 = IPermit2(borrowVault.permit2Address());
+        IERC20(borrowToken).forceApprove(address(permit2), type(uint256).max);
+        permit2.approve(address(borrowToken), address(_borrowVault), type(uint160).max, type(uint48).max);
+
         positionManager = positionManager_;
 
         evc.enableController(address(this), address(_borrowVault));
@@ -124,6 +132,7 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         evc.batch(batchItems);
 
         //we need to mint some initial tokens to zero address
+        _mint(address(1), totalAssets());
     }
 
     // totalAssets, we need to get the total eth that the underlying position holds and get stablecoin amount as well
@@ -224,8 +233,56 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         evc.batch(batchItems);
     }
 
+    function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares)
+        internal
+        override
+    {
+        (uint256 debtAmount, uint128 liquidity) = getDebtAmount(assets + 1);
+        debtAmount -= 2;
+
+        bool isTokenBeingBorrowedToken0_ = isTokenBeingBorrowedToken0();
+
+        IEVC.BatchItem[] memory batchItems = new IEVC.BatchItem[](3);
+
+        batchItems[0] = IEVC.BatchItem({
+            targetContract: address(wrapper),
+            onBehalfOfAccount: address(this),
+            value: 0,
+            data: abi.encodeWithSelector(IPreviewUnwrap.unwrap.selector, address(this), tokenId, address(this))
+        });
+
+        uint256 token0Amount = isTokenBeingBorrowedToken0_ ? debtAmount : assets + 1;
+        uint256 token1Amount = isTokenBeingBorrowedToken0_ ? assets + 1 : debtAmount;
+
+        //the act of wrapping the tokenId back should happen in the decreaseLiquidity function
+        batchItems[1] = IEVC.BatchItem({
+            targetContract: address(this),
+            onBehalfOfAccount: address(this),
+            value: 0,
+            data: abi.encodeWithSelector(this.decreaseLiquidity.selector, token0Amount, token1Amount, liquidity)
+        });
+
+        batchItems[2] = IEVC.BatchItem({
+            targetContract: address(borrowVault),
+            onBehalfOfAccount: address(this),
+            value: 0,
+            data: abi.encodeWithSelector(IEVault.repay.selector, debtAmount, address(this))
+        });
+
+        evc.batch(batchItems);
+
+        // in a batch we unwrap, decrease liquidity and wrap + repay
+
+        super._withdraw(caller, receiver, owner, assets, shares);
+    }
+
     function increaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) external onlySelfCallFromEVC {
         _increaseLiquidity(token0, token1, liquidity);
+        wrapper.wrap(tokenId, address(this));
+    }
+
+    function decreaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) external onlySelfCallFromEVC {
+        _decreaseLiquidity(token0, token1, liquidity);
         wrapper.wrap(tokenId, address(this));
     }
 
@@ -241,6 +298,8 @@ abstract contract BaseVault is ERC4626, EVCUtil {
     function _mintPosition(uint256 token0, uint256 token1, uint128 liquidity) internal virtual returns (uint256);
 
     function _increaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) internal virtual;
+
+    function _decreaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) internal virtual;
 
     function getCurrentSqrtPriceX96() public view virtual returns (uint160);
 

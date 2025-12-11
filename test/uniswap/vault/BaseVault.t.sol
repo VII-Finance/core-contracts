@@ -46,4 +46,9 @@ abstract contract BaseVaultTest is UniswapBaseTest {
         IERC20(vault.asset()).forceApprove(address(vault), type(uint256).max);
         vault.deposit(initialAmount, depositor);
     }
+
+    function test_withdraw() public {
+        test_deposit();
+        vault.redeem(vault.balanceOf(depositor), depositor, depositor);
+    }
 }

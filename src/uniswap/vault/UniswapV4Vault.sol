@@ -114,5 +114,23 @@ contract UniswapV4Vault is BaseVault {
         );
     }
 
+    function _decreaseLiquidity(uint256 token0Amount, uint256 token1Amount, uint128 liquidity) internal override {
+        bytes memory actions = new bytes(2);
+        actions[0] = bytes1(uint8(Actions.DECREASE_LIQUIDITY));
+        actions[1] = bytes1(uint8(Actions.TAKE_PAIR));
+
+        bytes[] memory params = new bytes[](2);
+        //TODO: figure out why token0Amount - 1 and token1Amount - 1 as minimum amounts is not working here
+        //  params[0] = abi.encode(tokenId, liquidity, token0Amount - 1, token1Amount - 1, "");
+        params[0] = abi.encode(tokenId, liquidity, 0, 0, "");
+        params[1] = abi.encode(poolKey.currency0, poolKey.currency1, ActionConstants.MSG_SENDER);
+
+        IPositionManager(address(positionManager)).modifyLiquidities(abi.encode(actions, params), block.timestamp);
+
+        if (poolKey.currency0.isAddressZero()) {
+            IWETH9(weth).deposit{value: address(this).balance}();
+        }
+    }
+
     receive() external payable {}
 }

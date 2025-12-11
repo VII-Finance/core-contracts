@@ -68,4 +68,24 @@ contract UniswapV3Vault is BaseVault {
 
         INonfungiblePositionManager(address(positionManager)).increaseLiquidity(params);
     }
+
+    function _decreaseLiquidity(uint256 token0Amount, uint256 token1Amount, uint128 liquidity) internal override {
+        INonfungiblePositionManager.DecreaseLiquidityParams memory params =
+            INonfungiblePositionManager.DecreaseLiquidityParams({
+                tokenId: tokenId,
+                liquidity: liquidity,
+                amount0Min: token0Amount - 1,
+                amount1Min: token1Amount - 1,
+                deadline: block.timestamp
+            });
+
+        (uint256 amount0, uint256 amount1) =
+            INonfungiblePositionManager(address(positionManager)).decreaseLiquidity(params);
+
+        INonfungiblePositionManager.CollectParams memory collectParams = INonfungiblePositionManager.CollectParams({
+            tokenId: tokenId, recipient: address(this), amount0Max: uint128(amount0), amount1Max: uint128(amount1)
+        });
+
+        INonfungiblePositionManager(address(positionManager)).collect(collectParams);
+    }
 }

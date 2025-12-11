@@ -105,10 +105,10 @@ contract MockUniswapV4Wrapper is UniswapV4Wrapper {
         local.feesOwed0 = tokensOwed[tokenId].fees0Owed;
         local.feesOwed1 = tokensOwed[tokenId].fees1Owed;
 
-        local.feesOwed0 += local.pendingFees0
-        - proportionalShare(local.pendingFees0 + local.feesOwed0, unwrapAmount, totalSupply(tokenId));
-        local.feesOwed1 += local.pendingFees1
-        - proportionalShare(local.pendingFees1 + local.feesOwed1, unwrapAmount, totalSupply(tokenId));
+        local.feesOwed0 = (local.feesOwed0 + local.pendingFees0)
+            - proportionalShare(local.pendingFees0 + local.feesOwed0, unwrapAmount, totalSupply(tokenId));
+        local.feesOwed1 = (local.feesOwed1 + local.pendingFees1)
+            - proportionalShare(local.pendingFees1 + local.feesOwed1, unwrapAmount, totalSupply(tokenId));
 
         // now we calculate the principal after the unwrap
         positionState.liquidity -= proportionalShare(

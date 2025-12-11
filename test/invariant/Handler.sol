@@ -314,6 +314,7 @@ contract Handler is Test, BaseSetup {
         uint256 expectTokenIdValueAfterUnwrap;
         uint256 tokenIdValueToTransfer;
         bool shouldUnwrapFail;
+        bool isZeroLiquidityDecreased;
         uint256 previewUnwrapAmount0;
         uint256 previewUnwrapAmount1;
         uint256 token0BalanceBeforeOfCurrentActor;
@@ -354,16 +355,15 @@ contract Handler is Test, BaseSetup {
             local.tokenId, unwrapAmount, local.balanceBeforeUnwrap
         );
 
-            //given unwrap amount, the UniswapV3Wrapper will calculate the liquidity to be removed
-            //if the liquidity to be removed is zero, call to the UniswapV3Pool will fails
-            //even if liquidity to be removed is non-zero, it may still result in amount0 and amount1 being zero
-            //which will make the collect call fail as well
-            //UniswapV4 doesn't have this problem as it allows decreasing 0 liquidity
-            bool isZeroLiquidityDecreased =
-                isV3 ? uniswapWrapper.isZeroLiquidityDecreased(tokenId, unwrapAmount) : false;
+        local.tokenIdValueToTransfer = local.tokenIdValueBeforeUnwrap - local.expectTokenIdValueAfterUnwrap;
 
-            bool shouldUnwrapFail = shouldNextActionFail(currentActor, tokenIdValueToTransfer, address(uniswapWrapper))
-                || isZeroLiquidityDecreased;
+        //given unwrap amount, the UniswapV3Wrapper will calculate the liquidity to be removed
+        //if the liquidity to be removed is zero, call to the UniswapV3Pool will fails
+        //even if liquidity to be removed is non-zero, it may still result in amount0 and amount1 being zero
+        //which will make the collect call fail as well
+        //UniswapV4 doesn't have this problem as it allows decreasing 0 liquidity
+        local.isZeroLiquidityDecreased =
+            isV3 ? uniswapWrapper.isZeroLiquidityDecreased(local.tokenId, unwrapAmount) : false;
 
         //if this tokenId is not enabled as collateral then the value being transferred is 0
         if (!tokenIdInfo[local.tokenId][isV3].isEnabled[currentActor]) {
@@ -372,7 +372,7 @@ contract Handler is Test, BaseSetup {
 
         local.shouldUnwrapFail = shouldNextActionFail(
             currentActor, local.tokenIdValueToTransfer, address(uniswapWrapper)
-        ) || isZeroLiquidityDecreased(local.tokenId, unwrapAmount, isV3);
+        ) || local.isZeroLiquidityDecreased;
 
         if (local.shouldUnwrapFail && FAIL_ON_REVERT) {
             vm.expectRevert();

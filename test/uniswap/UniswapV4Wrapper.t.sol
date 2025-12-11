@@ -437,7 +437,7 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
             .calculateExactedValueOfTokenIdAfterUnwrap(tokenIdMinted, partialUnwrapAmount, wrapper.FULL_AMOUNT());
         wrapper.unwrap(borrower, tokenIdMinted, borrower, partialUnwrapAmount, "");
 
-        assertApproxEqAbs(wrapper.balanceOf(borrower), expectedValueAfter, 1e18);
+        assertEq(wrapper.balanceOf(borrower), expectedValueAfter);
 
         (uint256 currentFees0Owed, uint256 currentFees1Owed) =
             MockUniswapV4Wrapper(payable(address(wrapper))).tokensOwed(tokenIdMinted);

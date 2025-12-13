@@ -277,35 +277,6 @@ contract Handler is Test, BaseSetup {
         tokenIdInfo[tokenId][isV3].holders.add(to);
     }
 
-    //given unwrap amount, the UniswapV3Wrapper will calculate the liquidity to be removed
-    //if the liquidity to be removed is zero, call to the UniswapV3Pool will fails
-    //even if liquidity to be removed is non-zero, it may still result in amount0 and amount1 being zero
-    //which will make the collect call fail as well
-    function isZeroLiquidityDecreased(uint256 tokenId, uint256 unwrapAmount, bool isV3) internal view returns (bool) {
-        if (!isV3) return false;
-
-        // in NonFungiblePositionManager, decrease liquidity fails if liquidity being removed is zero
-        if (unwrapAmount == 0) {
-            return true;
-        }
-
-        (,,,,, int24 tickLower, int24 tickUpper, uint128 liquidity,,,,) = nonFungiblePositionManager.positions(tokenId);
-        uint128 liquidityToRemove =
-            uint128(uniswapWrapper.proportionalShare(liquidity, unwrapAmount, uniswapWrapper.totalSupply(tokenId)));
-
-        if (liquidityToRemove == 0) {
-            return true;
-        }
-
-        // also make sure amount0 and amount1 resulting from liquidityToRemove is not zero either
-        // call to collect it will fail otherwise
-        (uint160 sqrtRatioX96,,,,,,) = uniswapV3Wrapper.pool().slot0();
-        (uint256 amount0, uint256 amount1) =
-            UniswapPositionValueHelper.principal(sqrtRatioX96, tickLower, tickUpper, liquidityToRemove);
-
-        return (amount0 == 0 && amount1 == 0);
-    }
-
     struct LocalVars {
         uint256[] tokenIds;
         uint256 tokenId;

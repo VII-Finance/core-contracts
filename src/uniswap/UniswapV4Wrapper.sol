@@ -246,11 +246,6 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         );
     }
 
-    /// @notice Calculates principal amounts for the full position
-    function _principal(PositionState memory positionState) internal pure returns (uint256, uint256) {
-        return _principal(positionState, positionState.liquidity);
-    }
-
     /// @notice Calculates principal amounts for a specific liquidity amount
     function _principal(PositionState memory positionState, uint128 liquidity)
         internal
@@ -286,18 +281,6 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
         amount0Received = currency0.balanceOfSelf() - currency0BalanceBefore;
         amount1Received = currency1.balanceOfSelf() - currency1BalanceBefore;
-    }
-
-    function _total(PositionState memory positionState, uint256 tokenId)
-        internal
-        view
-        returns (uint256 amount0Total, uint256 amount1Total)
-    {
-        (uint256 principalAmount0, uint256 principalAmount1) = _principal(positionState);
-        (uint256 pendingFees0, uint256 pendingFees1) = _pendingFees(positionState);
-
-        amount0Total = principalAmount0 + pendingFees0 + tokensOwed[tokenId].fees0Owed;
-        amount1Total = principalAmount1 + pendingFees1 + tokensOwed[tokenId].fees1Owed;
     }
 
     function _decodeExtraData(bytes calldata extraData)

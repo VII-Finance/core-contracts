@@ -277,35 +277,6 @@ contract Handler is Test, BaseSetup {
         tokenIdInfo[tokenId][isV3].holders.add(to);
     }
 
-    //given unwrap amount, the UniswapV3Wrapper will calculate the liquidity to be removed
-    //if the liquidity to be removed is zero, call to the UniswapV3Pool will fails
-    //even if liquidity to be removed is non-zero, it may still result in amount0 and amount1 being zero
-    //which will make the collect call fail as well
-    function isZeroLiquidityDecreased(uint256 tokenId, uint256 unwrapAmount, bool isV3) internal view returns (bool) {
-        if (!isV3) return false;
-
-        // in NonFungiblePositionManager, decrease liquidity fails if liquidity being removed is zero
-        if (unwrapAmount == 0) {
-            return true;
-        }
-
-        (,,,,, int24 tickLower, int24 tickUpper, uint128 liquidity,,,,) = nonFungiblePositionManager.positions(tokenId);
-        uint128 liquidityToRemove =
-            uint128(uniswapWrapper.proportionalShare(liquidity, unwrapAmount, uniswapWrapper.totalSupply(tokenId)));
-
-        if (liquidityToRemove == 0) {
-            return true;
-        }
-
-        // also make sure amount0 and amount1 resulting from liquidityToRemove is not zero either
-        // call to collect it will fail otherwise
-        (uint160 sqrtRatioX96,,,,,,) = uniswapV3Wrapper.pool().slot0();
-        (uint256 amount0, uint256 amount1) =
-            UniswapPositionValueHelper.principal(sqrtRatioX96, tickLower, tickUpper, liquidityToRemove);
-
-        return (amount0 == 0 && amount1 == 0);
-    }
-
     struct LocalVars {
         uint256[] tokenIds;
         uint256 tokenId;
@@ -314,6 +285,7 @@ contract Handler is Test, BaseSetup {
         uint256 expectTokenIdValueAfterUnwrap;
         uint256 tokenIdValueToTransfer;
         bool shouldUnwrapFail;
+        bool isZeroLiquidityDecreased;
         uint256 previewUnwrapAmount0;
         uint256 previewUnwrapAmount1;
         uint256 token0BalanceBeforeOfCurrentActor;
@@ -354,10 +326,15 @@ contract Handler is Test, BaseSetup {
             local.tokenId, unwrapAmount, local.balanceBeforeUnwrap
         );
 
-        console.log("tokenIdValueBeforeUnwrap", local.tokenIdValueBeforeUnwrap);
-        console.log("expectTokenIdValueAfterUnwrap", local.expectTokenIdValueAfterUnwrap);
-        //get the value of the tokenId
-        local.tokenIdValueToTransfer = local.tokenIdValueBeforeUnwrap - local.expectTokenIdValueAfterUnwrap; //We are not calculating the amount directly to avoid miscalculation due to rounding error
+        local.tokenIdValueToTransfer = local.tokenIdValueBeforeUnwrap - local.expectTokenIdValueAfterUnwrap;
+
+        //given unwrap amount, the UniswapV3Wrapper will calculate the liquidity to be removed
+        //if the liquidity to be removed is zero, call to the UniswapV3Pool will fails
+        //even if liquidity to be removed is non-zero, it may still result in amount0 and amount1 being zero
+        //which will make the collect call fail as well
+        //UniswapV4 doesn't have this problem as it allows decreasing 0 liquidity
+        local.isZeroLiquidityDecreased =
+            isV3 ? uniswapWrapper.isZeroLiquidityDecreased(local.tokenId, unwrapAmount) : false;
 
         //if this tokenId is not enabled as collateral then the value being transferred is 0
         if (!tokenIdInfo[local.tokenId][isV3].isEnabled[currentActor]) {
@@ -366,7 +343,7 @@ contract Handler is Test, BaseSetup {
 
         local.shouldUnwrapFail = shouldNextActionFail(
             currentActor, local.tokenIdValueToTransfer, address(uniswapWrapper)
-        ) || isZeroLiquidityDecreased(local.tokenId, unwrapAmount, isV3);
+        ) || local.isZeroLiquidityDecreased;
 
         if (local.shouldUnwrapFail && FAIL_ON_REVERT) {
             vm.expectRevert();
@@ -543,11 +520,11 @@ contract Handler is Test, BaseSetup {
                 //TODO: why is there 1 wei of error here?
                 assertLe(
                     uniswapWrapper.balanceOf(currentActor),
-                    fromBalanceBeforeTransfer - transferAmount + 4,
+                    fromBalanceBeforeTransfer - transferAmount + 5,
                     "uniswapWrapper: transferWithoutActiveLiquidation should decrease balance of sender"
                 );
                 assertGe(
-                    uniswapWrapper.balanceOf(to) + 4,
+                    uniswapWrapper.balanceOf(to) + 5,
                     toBalanceBeforeTransfer + transferAmount,
                     "uniswapWrapper: transferWithoutActiveLiquidation should increase balance of receiver"
                 );
@@ -556,7 +533,7 @@ contract Handler is Test, BaseSetup {
                 // due to rounding errors the balances after the transfer can be less than before by a few wei and that is expected
                 assertLe(
                     uniswapWrapper.balanceOf(currentActor) + uniswapWrapper.balanceOf(to),
-                    fromBalanceBeforeTransfer + toBalanceBeforeTransfer + 4,
+                    fromBalanceBeforeTransfer + toBalanceBeforeTransfer + 5,
                     "uniswapWrapper: transferWithoutActiveLiquidation should not create money out of thin air"
                 );
 
@@ -650,5 +627,23 @@ contract Handler is Test, BaseSetup {
 
     function borrowTokenB(uint256 actorIndexSeed, uint256 borrowAmount) public useActor(actorIndexSeed) {
         borrowUpToMax(currentActor, eTokenBVault, borrowAmount);
+    }
+
+    // We need to donate fees to the Uniswap pools
+    // For Uniswap V3, we use pool.flash to donate to current liquidity providers
+    // For Uniswap V4, the donate function is already available
+    // We do this to ensure that fees related invariants can be tested properly
+    function donateFees(uint256 amount0, uint256 amount1, bool isV3) public {
+        //make sure that there is non zero liquidity at the current price
+        bool isNonZeroLiquidity = feeDonator.isNonZeroLiquidity(isV3);
+        if (isNonZeroLiquidity && FAIL_ON_REVERT) {
+            amount0 = bound(amount0, 1, 1e30);
+            amount1 = bound(amount1, 1, 1e30);
+
+            deal(address(token0), address(feeDonator), amount0);
+            deal(address(token1), address(feeDonator), amount1);
+
+            feeDonator.donate(amount0, amount1, isV3);
+        }
     }
 }

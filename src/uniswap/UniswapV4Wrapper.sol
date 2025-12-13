@@ -246,11 +246,6 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         );
     }
 
-    /// @notice Calculates principal amounts for the full position
-    function _principal(PositionState memory positionState) internal pure returns (uint256, uint256) {
-        return _principal(positionState, positionState.liquidity);
-    }
-
     /// @notice Calculates principal amounts for a specific liquidity amount
     function _principal(PositionState memory positionState, uint128 liquidity)
         internal

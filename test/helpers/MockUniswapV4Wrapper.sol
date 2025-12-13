@@ -65,6 +65,11 @@ contract MockUniswapV4Wrapper is UniswapV4Wrapper {
         return _pendingFees(positionState);
     }
 
+    /// @notice Calculates principal amounts for the full position
+    function _principal(PositionState memory positionState) internal pure returns (uint256, uint256) {
+        return _principal(positionState, positionState.liquidity);
+    }
+
     function _total(PositionState memory positionState, uint256 tokenId)
         internal
         view

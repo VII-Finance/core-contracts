@@ -88,4 +88,8 @@ contract UniswapV3Vault is BaseVault {
 
         INonfungiblePositionManager(address(positionManager)).collect(collectParams);
     }
+
+    function _getCurrentLiquidity() internal view override returns (uint128 liquidity) {
+        (,,,,,,, liquidity,,,,) = INonfungiblePositionManager(address(positionManager)).positions(tokenId);
+    }
 }

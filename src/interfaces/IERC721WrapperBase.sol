@@ -30,4 +30,8 @@ interface IERC721WrapperBase is IPartialERC20 {
         external
         pure
         returns (uint256);
+    function getSqrtRatioX96(address token0, address token1, uint256 unit0, uint256 unit1)
+        external
+        view
+        returns (uint160 sqrtRatioX96);
 }

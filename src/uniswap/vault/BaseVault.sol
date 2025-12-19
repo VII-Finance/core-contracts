@@ -18,6 +18,7 @@ import {IEVault} from "lib/euler-interfaces/interfaces/IEVault.sol";
 import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {IERC6909} from "lib/openzeppelin-contracts/contracts/interfaces/IERC6909.sol";
 import {IPermit2} from "lib/v4-periphery/lib/permit2/src/interfaces/IPermit2.sol";
+import {IPriceOracle} from "src/interfaces/IPriceOracle.sol";
 import {console} from "lib/forge-std/src/console.sol";
 
 interface IPreviewUnwrap {
@@ -34,7 +35,18 @@ abstract contract BaseVault is ERC4626, EVCUtil {
     using Math for uint256;
     uint256 public constant FULL_AMOUNT = 1e36;
 
+    uint256 public constant MINIMUM_SHARES = 1000;
+
+    uint256 public constant TARGET_LEVERAGE = 2e18; // 2x leverage with 18 decimals
+
     IERC721WrapperBase public immutable wrapper;
+
+    // fetched from the wrapper but stored as immutable for gas savings
+    IPriceOracle public immutable oracle;
+    address public immutable unitOfAccount;
+
+    uint256 public immutable unitOfAsset;
+    uint256 public immutable unitOfBorrowToken;
 
     address public immutable borrowToken;
     IERC721 public immutable positionManager;
@@ -50,6 +62,7 @@ abstract contract BaseVault is ERC4626, EVCUtil {
     error NotSelfCallingThroughEVC();
     error VaultAlreadyInitialized();
     error NotAllowedIfLiquidated();
+    error InsufficientInitialShares();
 
     constructor(IERC721WrapperBase _wrapper, IERC20 _asset, IEVault _borrowVault)
         ERC20("VII Vault", "VII")
@@ -89,6 +102,12 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         tickUpper = TickMath.maxUsableTick(10);
 
         positionManager.setApprovalForAll(address(wrapper), true);
+
+        oracle = _wrapper.oracle();
+        unitOfAccount = _wrapper.unitOfAccount();
+
+        unitOfAsset = 10 ** ERC20(address(_asset)).decimals();
+        unitOfBorrowToken = 10 ** ERC20(borrowToken).decimals();
     }
 
     function _getTokens(address _wrapper) public view virtual returns (address, address);
@@ -132,7 +151,13 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         evc.batch(batchItems);
 
         //we need to mint some initial tokens to zero address
-        _mint(address(1), totalAssets());
+        uint256 sharesToMint = totalAssets();
+
+        if (sharesToMint < MINIMUM_SHARES) {
+            revert InsufficientInitialShares();
+        }
+
+        _mint(address(1), sharesToMint);
     }
 
     // totalAssets, we need to get the total eth that the underlying position holds and get stablecoin amount as well
@@ -276,6 +301,76 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         super._withdraw(caller, receiver, owner, assets, shares);
     }
 
+    // we need to have a function that takes the existing hanging ETH and borrows to open more positions
+    // and takes the hanging USDC balance and repay the debt
+    // hanging eth are ok to stay in the vault but handing USDC are not good
+
+    // this vault itself can use subAccounts to open positions in multiple markets
+
+    // we should maybe exact the amount that vault should swap from the rebalancer and also the calladata for where to swap as well
+    // based on the amount provided by the rebalancer, we can decide how much liquidity to remove
+    function reBalance() external {
+        // what we are going to do is find out wheather the leverage is less or greater than target leverage
+
+        // we need to get the total assets and total debt
+        // the assumption
+
+        bool isTokenBeingBorrowedToken0_ = isTokenBeingBorrowedToken0();
+
+        uint256 totalCollateralInUOA = wrapper.balanceOf(address(this));
+
+        // and then we simply get the debt
+        // convert it in unit of account as well
+        uint256 borrowedAmount = borrowVault.debtOf(address(this));
+        uint256 borrowAmountInUOA = oracle.getQuote(borrowedAmount, borrowToken, unitOfAccount);
+
+        // we get the current leverage this way
+        // after that we figure out what swap needs to be done
+
+        uint256 currentLeverage = (totalCollateralInUOA * 1e18) / borrowAmountInUOA;
+
+        if (currentLeverage > TARGET_LEVERAGE) {
+            // this what should be used off chain to determin how much to eth we need to swap to USDC
+            // uint256 collateralAmountToReduceInUOA = (currentLeverage
+            //         * borrowAmountInUOA
+            //         - (totalCollateralInUOA * 1e18)) / currentLeverage - TARGET_LEVERAGE;
+
+            // uint128 liquidityToRemove =
+            //     _getCurrentLiquidity() * uint128(collateralAmountToReduceInUOA) / uint128(totalCollateralInUOA);
+
+            // and then based on the liquidityToRemove we know how much ETH we need to swap
+
+            //now in a batch we unwrap, decrease liquidity, convert eth into USDC and then repay the debt using the current balance of the contract
+            // do we even know the debt amount we will be repaying here?
+
+            // based off of that we need to get the liquidity that we need to reduce
+            // we get the current liquidity and take a proportion of that
+        } else {
+
+            // if the leverage is less than the target leverage then we need to borrow more USDC and convert some of it into ETH and unwrap and increase liquidity
+
+            }
+
+        // we do that swap using the data provided by the caller
+        // do we do this swap on the same pool itself or do we allow arbitary calldata?
+        // let's do both. If this pool is the best place to swap then data will be non empty and we do the swap elsewhere
+
+        // after the swap we make sure the price we got for the swap was within the acceptable bounds of the oracle price
+
+        // and then we check to make sure that this helped with the current leverage go in the direction of the target leverage
+
+        // let's keep this such that we can make it callable without any arguments
+
+        // for heritistics on how much do we afford to make the swaps with what frequency need to be developed
+        // make sure the rebalance costs are not higher than the 50% of the yield earned
+    }
+
+    function changeTicks(int24 newTickLower, int24 newTickUpper) external {
+        // how do we handle the the fact that there might be some hanging USDC or ETH in the contract?
+        // unwrap, decrease all of the liquidity (do not wrap again when decreasing liquidity), change the ticks and then increase liquidity and wrap again
+
+        }
+
     function increaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) external onlySelfCallFromEVC {
         _increaseLiquidity(token0, token1, liquidity);
         wrapper.wrap(tokenId, address(this));
@@ -294,12 +389,26 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         wrapper.enableTokenIdAsCollateral(tokenId);
     }
 
+    function swapCurrentBalanceOfAssetToBorrowToken(bytes calldata data) external onlySelfCallFromEVC {
+        // the assumption is that the data will be from an aggregator like 0x where knowing in advance the input amount is not required
+
+        // we develop a generic Handler that does the swap for us. The generic handler doesn't have to be trusted
+        // we simply transfer the amount to that address and it will send us the borrow token back
+        // we make sure that the borrow token received more or less matches the oracle price
+    }
+
+    function repayContractBalance() external onlySelfCallFromEVC {
+        borrowVault.repay(IERC20(borrowToken).balanceOf(address(this)), address(this));
+    }
+
     //mintPosition return the tokenId and send that tokenId to the wrapper contract to be skimmed
     function _mintPosition(uint256 token0, uint256 token1, uint128 liquidity) internal virtual returns (uint256);
 
     function _increaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) internal virtual;
 
     function _decreaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) internal virtual;
+
+    function _getCurrentLiquidity() internal view virtual returns (uint128);
 
     // we have one type of rebalance the same as other liquidity manager. Where a priviledged address is allowed to change ticks
     // another is where we adjust the debt of the protocol

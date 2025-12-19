@@ -16,9 +16,11 @@ import {Actions} from "lib/v4-periphery/src/libraries/Actions.sol";
 import {ActionConstants} from "lib/v4-periphery/src/libraries/ActionConstants.sol";
 import {IWETH9} from "lib/v4-periphery/src/interfaces/external/IWETH9.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {PositionInfo} from "lib/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 
 contract UniswapV4Vault is BaseVault {
     using StateLibrary for IPoolManager;
+
     address public immutable weth;
     IPoolManager public immutable poolManager;
     PoolId public immutable poolId;
@@ -130,6 +132,13 @@ contract UniswapV4Vault is BaseVault {
         if (poolKey.currency0.isAddressZero()) {
             IWETH9(weth).deposit{value: address(this).balance}();
         }
+    }
+
+    function _getCurrentLiquidity() internal view override returns (uint128 liquidity) {
+        PositionInfo position = IPositionManager(address(positionManager)).positionInfo(tokenId);
+        (liquidity,,) = poolManager.getPositionInfo(
+            poolId, address(positionManager), position.tickLower(), position.tickUpper(), bytes32(tokenId)
+        );
     }
 
     receive() external payable {}

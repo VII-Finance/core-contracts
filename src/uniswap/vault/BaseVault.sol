@@ -19,6 +19,7 @@ import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {IERC6909} from "lib/openzeppelin-contracts/contracts/interfaces/IERC6909.sol";
 import {IPermit2} from "lib/v4-periphery/lib/permit2/src/interfaces/IPermit2.sol";
 import {IPriceOracle} from "src/interfaces/IPriceOracle.sol";
+import {GenericRouter} from "src/uniswap/vault/GenericRouter.sol";
 import {console} from "lib/forge-std/src/console.sol";
 
 interface IPreviewUnwrap {
@@ -51,6 +52,7 @@ abstract contract BaseVault is ERC4626, EVCUtil {
     address public immutable borrowToken;
     IERC721 public immutable positionManager;
     IEVault public immutable borrowVault;
+    GenericRouter public immutable genericRouter;
 
     int24 public tickLower;
     int24 public tickUpper;
@@ -108,6 +110,8 @@ abstract contract BaseVault is ERC4626, EVCUtil {
 
         unitOfAsset = 10 ** ERC20(address(_asset)).decimals();
         unitOfBorrowToken = 10 ** ERC20(borrowToken).decimals();
+
+        genericRouter = new GenericRouter();
     }
 
     function _getTokens(address _wrapper) public view virtual returns (address, address);
@@ -309,13 +313,13 @@ abstract contract BaseVault is ERC4626, EVCUtil {
 
     // we should maybe exact the amount that vault should swap from the rebalancer and also the calladata for where to swap as well
     // based on the amount provided by the rebalancer, we can decide how much liquidity to remove
-    function reBalance() external {
+    function reBalance(uint256 amountToSwap, address exchange, address spender, bytes calldata swapData) external {
         // what we are going to do is find out wheather the leverage is less or greater than target leverage
 
         // we need to get the total assets and total debt
         // the assumption
 
-        bool isTokenBeingBorrowedToken0_ = isTokenBeingBorrowedToken0();
+        // bool isTokenBeingBorrowedToken0_ = isTokenBeingBorrowedToken0();
 
         uint256 totalCollateralInUOA = wrapper.balanceOf(address(this));
 
@@ -330,7 +334,13 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         uint256 currentLeverage = (totalCollateralInUOA * 1e18) / borrowAmountInUOA;
 
         if (currentLeverage > TARGET_LEVERAGE) {
-            // this what should be used off chain to determin how much to eth we need to swap to USDC
+            // this what should be used off chain to determing how much to eth we need to swap to USDC
+
+            // now in a batch we unwrap, decrease liquidity, convert eth into USDC and then repay the debt using the current balance of the contract
+            // do we even know the debt amount we will be repaying here?
+
+            // based off of that we need to get the liquidity that we need to reduce
+            // we get the current liquidity and take a proportion of that
             // uint256 collateralAmountToReduceInUOA = (currentLeverage
             //         * borrowAmountInUOA
             //         - (totalCollateralInUOA * 1e18)) / currentLeverage - TARGET_LEVERAGE;
@@ -340,29 +350,73 @@ abstract contract BaseVault is ERC4626, EVCUtil {
 
             // and then based on the liquidityToRemove we know how much ETH we need to swap
 
-            //now in a batch we unwrap, decrease liquidity, convert eth into USDC and then repay the debt using the current balance of the contract
-            // do we even know the debt amount we will be repaying here?
+            // we know how much liquidity we need to remove
+            IEVC.BatchItem[] memory batchItems = new IEVC.BatchItem[](4);
 
-            // based off of that we need to get the liquidity that we need to reduce
-            // we get the current liquidity and take a proportion of that
+            // this is effectively same as withdraw but the result ETH is then swapped to further repay the loan
+            // so maybe the logic can be reused
+
+            batchItems[0] = IEVC.BatchItem({
+                targetContract: address(wrapper),
+                onBehalfOfAccount: address(this),
+                value: 0,
+                data: abi.encodeWithSelector(IPreviewUnwrap.unwrap.selector, address(this), tokenId, address(this))
+            });
+
+            {
+                (uint256 debtAmount, uint128 liquidity) = getDebtAmount(amountToSwap);
+                batchItems[1] = IEVC.BatchItem({
+                    targetContract: address(this),
+                    onBehalfOfAccount: address(this),
+                    value: 0,
+                    data: abi.encodeWithSelector(
+                        this.decreaseLiquidity.selector,
+                        isTokenBeingBorrowedToken0() ? debtAmount : amountToSwap + 1,
+                        isTokenBeingBorrowedToken0() ? amountToSwap + 1 : debtAmount,
+                        liquidity
+                    )
+                });
+            }
+            batchItems[3] = IEVC.BatchItem({
+                targetContract: address(this),
+                onBehalfOfAccount: address(this),
+                value: 0,
+                data: abi.encodeWithSelector(
+                    this.swapAssetToBorrowToken.selector, amountToSwap, exchange, spender, swapData
+                )
+            });
+
+            batchItems[4] = IEVC.BatchItem({
+                targetContract: address(this),
+                onBehalfOfAccount: address(this),
+                value: 0,
+                data: abi.encodeWithSelector(this.repayContractBalance.selector)
+            });
+
+            evc.batch(batchItems);
         } else {
-
             // if the leverage is less than the target leverage then we need to borrow more USDC and convert some of it into ETH and unwrap and increase liquidity
 
-            }
+            // How much? it's given by the same equation when leverage is higher but with negation
 
-        // we do that swap using the data provided by the caller
-        // do we do this swap on the same pool itself or do we allow arbitary calldata?
-        // let's do both. If this pool is the best place to swap then data will be non empty and we do the swap elsewhere
+            // uint256 collateralAmountToReduceInUOA = (totalCollateralInUOA * 1e18)
+            //         - (currentLeverage * borrowAmountInUOA)) / TARGET_LEVERAGE - current leverage;
 
-        // after the swap we make sure the price we got for the swap was within the acceptable bounds of the oracle price
+            // on top of borrowing some USDC and convert it to ETH this is the same as deposit
 
-        // and then we check to make sure that this helped with the current leverage go in the direction of the target leverage
+            IEVC.BatchItem[] memory batchItems = new IEVC.BatchItem[](1);
 
-        // let's keep this such that we can make it callable without any arguments
+            batchItems[0] = IEVC.BatchItem({
+                targetContract: address(this),
+                onBehalfOfAccount: address(this),
+                value: 0,
+                data: abi.encodeWithSelector(
+                    this.borrowSwapBorrowIncreaseLiquidity.selector, amountToSwap, exchange, spender, swapData
+                )
+            });
 
-        // for heritistics on how much do we afford to make the swaps with what frequency need to be developed
-        // make sure the rebalance costs are not higher than the 50% of the yield earned
+            evc.batch(batchItems);
+        }
     }
 
     function changeTicks(int24 newTickLower, int24 newTickUpper) external {
@@ -376,7 +430,7 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         wrapper.wrap(tokenId, address(this));
     }
 
-    function decreaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) external onlySelfCallFromEVC {
+    function decreaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) public onlySelfCallFromEVC {
         _decreaseLiquidity(token0, token1, liquidity);
         wrapper.wrap(tokenId, address(this));
     }
@@ -389,18 +443,58 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         wrapper.enableTokenIdAsCollateral(tokenId);
     }
 
-    function swapCurrentBalanceOfAssetToBorrowToken(bytes calldata data) external onlySelfCallFromEVC {
+    function swapAssetToBorrowToken(uint256 amountToSwap, address exchange, address spender, bytes calldata swapData)
+        external
+        onlySelfCallFromEVC
+    {
         // the assumption is that the data will be from an aggregator like 0x where knowing in advance the input amount is not required
 
         // we develop a generic Handler that does the swap for us. The generic handler doesn't have to be trusted
         // we simply transfer the amount to that address and it will send us the borrow token back
         // we make sure that the borrow token received more or less matches the oracle price
+
+        IERC20(asset()).safeTransfer(address(genericRouter), amountToSwap);
+
+        uint256 borrowTokenBalanceBefore = IERC20(borrowToken).balanceOf(address(this));
+        genericRouter.executeSwap(IERC20(asset()), IERC20(borrowToken), exchange, spender, swapData);
+
+        uint256 borrowTokensReceived = IERC20(borrowToken).balanceOf(address(this)) - borrowTokenBalanceBefore;
+
+        //add a check to make sure borrowToken Received is appropriate based on the oracle price
     }
 
     function repayContractBalance() external onlySelfCallFromEVC {
         borrowVault.repay(IERC20(borrowToken).balanceOf(address(this)), address(this));
     }
 
+    function borrowSwapBorrowIncreaseLiquidity(
+        uint256 amountToSwap,
+        address exchange,
+        address spender,
+        bytes calldata swapData
+    ) external onlySelfCallFromEVC {
+        borrowVault.borrow(amountToSwap, address(this));
+
+        uint256 assetBalanceBefore = IERC20(asset()).balanceOf(address(this));
+        genericRouter.executeSwap(IERC20(borrowToken), IERC20(asset()), exchange, spender, swapData);
+
+        uint256 assetsReceived = IERC20(asset()).balanceOf(address(this)) - assetBalanceBefore;
+
+        // add a check to make sure assetsReceived is appropriate based on the oracle price
+
+        (uint256 debtAmount, uint128 liquidity) = getDebtAmount(assetsReceived);
+
+        borrowVault.borrow(debtAmount, address(this));
+
+        // unwrap and increase liquidity
+        wrapper.unwrap(address(this), tokenId, address(this));
+        _increaseLiquidity(
+            isTokenBeingBorrowedToken0() ? debtAmount : assetsReceived,
+            isTokenBeingBorrowedToken0() ? assetsReceived : debtAmount,
+            liquidity
+        );
+        wrapper.wrap(tokenId, address(this));
+    }
     //mintPosition return the tokenId and send that tokenId to the wrapper contract to be skimmed
     function _mintPosition(uint256 token0, uint256 token1, uint128 liquidity) internal virtual returns (uint256);
 

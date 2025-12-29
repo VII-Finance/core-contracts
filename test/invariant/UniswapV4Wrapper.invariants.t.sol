@@ -76,6 +76,24 @@ contract UniswapWrappersInvariants is Test {
         assertTotal6909SupplyEqualsSumOfBalances(false);
     }
 
+    function assertWrappedTokenIdsAreHeldByTheWrappers(bool isV3) public view {
+        IMockUniswapWrapper uniswapWrapper = getUniswapWrapper(isV3);
+        uint256[] memory allTokenIds = handler.getAllTokenIds(isV3);
+        for (uint256 i = 0; i < allTokenIds.length; i++) {
+            uint256 tokenId = allTokenIds[i];
+            bool isWrapped = handler.isTokenIdWrapped(tokenId, isV3);
+            if (isWrapped) {
+                address owner = uniswapWrapper.underlying().ownerOf(tokenId);
+                assertEq(owner, address(uniswapWrapper), "Wrapped tokenId is not held by the wrapper");
+            }
+        }
+    }
+
+    function invariant_wrappedTokenIdAreHeldByTheWrappers() public view {
+        assertWrappedTokenIdsAreHeldByTheWrappers(true);
+        assertWrappedTokenIdsAreHeldByTheWrappers(false);
+    }
+
     function invariant_liquidity() public view {
         for (uint256 i = 0; i < handler.actorsLength(); i++) {
             address actor = handler.actors(i);

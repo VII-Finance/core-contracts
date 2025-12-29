@@ -33,6 +33,8 @@ library UniswapPositionValueHelper {
         pure
         returns (uint256 amount)
     {
-        amount = FullMath.mulDiv(feeGrowthInsideX128 - feeGrowthInsideLastX128, liquidity, FixedPoint128.Q128);
+        amount = feeGrowthInsideX128 > feeGrowthInsideLastX128
+            ? FullMath.mulDiv(feeGrowthInsideX128 - feeGrowthInsideLastX128, liquidity, FixedPoint128.Q128)
+            : 0;
     }
 }

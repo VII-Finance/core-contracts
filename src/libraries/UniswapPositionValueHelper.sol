@@ -31,10 +31,11 @@ library UniswapPositionValueHelper {
     function feesOwed(uint256 feeGrowthInsideX128, uint256 feeGrowthInsideLastX128, uint128 liquidity)
         internal
         pure
-        returns (uint256 amount)
+        returns (uint256)
     {
-        amount = feeGrowthInsideX128 > feeGrowthInsideLastX128
-            ? FullMath.mulDiv(feeGrowthInsideX128 - feeGrowthInsideLastX128, liquidity, FixedPoint128.Q128)
-            : 0;
+        // calculate accumulated fees. overflow in the subtraction of fee growth is expected
+        unchecked {
+            return FullMath.mulDiv(feeGrowthInsideX128 - feeGrowthInsideLastX128, liquidity, FixedPoint128.Q128);
+        }
     }
 }

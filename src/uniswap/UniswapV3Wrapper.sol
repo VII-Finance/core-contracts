@@ -203,6 +203,7 @@ contract UniswapV3Wrapper is ERC721WrapperBase {
         (,, uint256 lowerFeeGrowthOutside0X128, uint256 lowerFeeGrowthOutside1X128,,,,) = pool.ticks(tickLower);
         (,, uint256 upperFeeGrowthOutside0X128, uint256 upperFeeGrowthOutside1X128,,,,) = pool.ticks(tickUpper);
 
+        // calculate fee growth inside. the calculation relied on unchecked arithmetic
         unchecked {
             if (tickCurrent < tickLower) {
                 feeGrowthInside0X128 = lowerFeeGrowthOutside0X128 - upperFeeGrowthOutside0X128;

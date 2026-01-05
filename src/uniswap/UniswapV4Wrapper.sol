@@ -138,6 +138,8 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         tokensOwed[tokenId] = feesOwed;
 
         currency1.transfer(to, amount1 + fees1ToSend);
+        // currency0 can be native ETH, where we know for sure that reentrancy is possible.
+        // We keep this transfer at the very end of the action to minimize risk.
         currency0.transfer(to, amount0 + fees0ToSend);
     }
 
@@ -149,6 +151,8 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
             currency1.transfer(to, fees1ToSend);
         }
         if (fees0ToSend != 0) {
+            // currency0 can be native ETH, where we know for sure that reentrancy is possible.
+            // We keep this transfer at the very end of the action to minimize risk.
             currency0.transfer(to, fees0ToSend);
         }
     }

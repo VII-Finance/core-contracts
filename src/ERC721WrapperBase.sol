@@ -50,8 +50,10 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         if (enabled) emit TokenIdEnabled(sender, tokenId, true);
     }
 
-    ///@dev returns true if it was enabled. if it was never enabled, it will return false
-    function disableTokenIdAsCollateral(uint256 tokenId) external callThroughEVC returns (bool disabled) {
+    /// @dev Returns true if it was enabled. If it was never enabled, it will return false.
+    /// @dev The callThroughEVC modifier is only needed in actions that request account status check mid-execution when it's really needed
+    ///      at the end of the action. For this action, it is acceptable if the account status check happens before the event is emitted.
+    function disableTokenIdAsCollateral(uint256 tokenId) external returns (bool disabled) {
         address sender = _msgSender();
         disabled = _enabledTokenIds[sender].remove(tokenId);
         evc.requireAccountStatusCheck(sender);
@@ -63,26 +65,43 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         _wrap(tokenId, to);
     }
 
-    ///@dev to get the entire tokenId, use this function
+    /// @dev To get the entire tokenId, use this function.
+    /// @dev The callThroughEVC modifier is not really needed here. Even though the account status check technically happens mid-execution
+    ///      (in the overridden _update function triggered by _burnFrom), the totalSupply of tokenId is already burned before the
+    ///      account status check happens. The actual NFT transfer doesn't really matter in Uniswap wrappers case. We have still kept it so that account status checks
+    ///      only happen at the end of the action for future wrappers where it might be needed.
     function unwrap(address from, uint256 tokenId, address to) external callThroughEVC {
         _burnFrom(from, tokenId, totalSupply(tokenId));
         underlying.transferFrom(address(this), to, tokenId);
+        // We want this to happen at the end; otherwise, using the token transfers (especially native ETH transfers) that happen in Uniswap wrappers,
+        // a user can reenter and could cause issues.
         _settleFullUnwrap(tokenId, to);
-    }
+    }   
 
+    /// @dev Partial unwrap.
+    /// @dev The callThroughEVC modifier is needed because we need the actual unwrap to happen before the burning of ERC6909 tokens
+    ///      to avoid reentrancy through token transfers (especially native ETH transfers).
+    ///      In unwrap, for Uniswap wrappers, proportional liquidity is removed and because it happens after the _burnFrom,
+    ///      where the account status check happens, we definitely need it to happen at the end of the action to make sure
+    ///      proportional liquidity is removed before balanceOf considers the current liquidity to determine the value of the collateral.
     function unwrap(address from, uint256 tokenId, address to, uint256 amount, bytes calldata extraData)
         external
         callThroughEVC
     {
         uint256 totalSupplyOfTokenId = totalSupply(tokenId);
         _burnFrom(from, tokenId, amount);
+        // We want unwrap to happen at the end; otherwise, using the token transfers (especially native ETH transfers) that happen in Uniswap wrappers,
+        // a user can reenter and could cause issues.
         _unwrap(to, tokenId, totalSupplyOfTokenId, amount, extraData);
     }
 
-    /// @notice For regular EVK vaults, it transfers the specified amount of vault shares from the sender to the receiver
-    /// @dev For ERC721WrapperBase, transfers a proportional amount of ERC6909 tokens (calculated as totalSupply(tokenId) * amount / balanceOf(sender)) for each enabled tokenId from the sender to the receiver.
-    /// @dev no need to check if sender is being liquidated, sender can choose to do this at any time
+    /// @notice For regular EVK vaults, it transfers the specified amount of vault shares from the sender to the receiver.
+    /// @dev For ERC721WrapperBase, transfers a proportional amount of ERC6909 tokens (calculated as totalSupply(tokenId) * amount / balanceOf(sender))
+    ///      for each enabled tokenId from the sender to the receiver.
+    /// @dev No need to check if sender is being liquidated; sender can choose to do this at any time.
     /// @dev When calculating how many ERC6909 tokens to transfer, rounding is performed in favor of the receiver (typically the liquidator).
+    /// @dev The callThroughEVC modifier is needed here to make sure account status checks do not happen every time there is a ERC6909 transfer.
+    ///      We save gas by doing the account status check only at the end of this action.
     function transfer(address to, uint256 amount) external callThroughEVC returns (bool) {
         address sender = _msgSender();
         uint256 currentBalance = balanceOf(sender);
@@ -92,9 +111,9 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         for (uint256 i = 0; i < totalTokenIds; ++i) {
             uint256 tokenId = tokenIdOfOwnerByIndex(sender, i);
             uint256 balanceOfTokenId = balanceOf(sender, tokenId);
-            if (balanceOfTokenId == 0) continue; //if the tokenId balance of sender is zero, we skip it to avoid 0 transfers
+            if (balanceOfTokenId == 0) continue; // If the tokenId balance of sender is zero, we skip it to avoid 0 transfers.
 
-            _transfer(sender, to, tokenId, normalizedToFull(balanceOfTokenId, amount, currentBalance)); //this concludes the liquidation. The liquidator can come back to do whatever they want with the ERC6909 tokens
+            _transfer(sender, to, tokenId, normalizedToFull(balanceOfTokenId, amount, currentBalance)); // This concludes the liquidation. The liquidator can come back to do whatever they want with the ERC6909 tokens.
         }
         return true;
     }
@@ -107,7 +126,7 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         for (uint256 i = 0; i < totalTokenIds; ++i) {
             uint256 tokenId = tokenIdOfOwnerByIndex(owner, i);
             uint256 balanceOfTokenId = balanceOf(owner, tokenId);
-            if (balanceOfTokenId == 0) continue; //if the tokenId balance of sender is zero, we skip it
+            if (balanceOfTokenId == 0) continue; // If the tokenId balance of sender is zero, we skip it.
 
             totalValue += calculateValueOfTokenId(tokenId, balanceOfTokenId);
         }
@@ -178,6 +197,7 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
 
     function _update(address from, address to, uint256 id, uint256 amount) internal virtual override {
         super._update(from, to, id, amount);
+        // there is no need for account status when ERC6909 tokens are minted (wrap action) as it only increases the value of collateral
         if (from != address(0)) evc.requireAccountStatusCheck(from);
     }
 
@@ -189,7 +209,7 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         return Math.mulDiv(amount, part, totalSupplyOfTokenId);
     }
 
-    ///@dev rounding is done in favor of the receiver (liquidator in case of liquidation)
+    /// @dev Rounding is done in favor of the receiver (receiver = liquidator in case of liquidation).
     function normalizedToFull(uint256 balanceOfTokenId, uint256 amount, uint256 currentBalance)
         public
         pure
@@ -203,7 +223,7 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         return success && data.length == 32 ? abi.decode(data, (uint8)) : 18;
     }
 
-    ///@dev specific to the implementation, it should return the tokenId that needs to be skimmed
+    /// @dev Specific to the implementation, it should return the tokenId that needs to be skimmed.
     function getTokenIdToSkim() public view virtual returns (uint256);
 
     function _msgSender() internal view virtual override(Context, EVCUtil) returns (address) {
@@ -232,11 +252,11 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
 
     function skim(address to) external {
         uint256 tokenId = getTokenIdToSkim();
-        //in case the tokenId is not owned by this contract already, it will revert
+        // In case the tokenId is not owned by this contract already, it will revert.
         if (underlying.ownerOf(tokenId) != address(this)) {
             revert TokenIdNotOwnedByThisContract();
         }
-        //in case someone tries to skim already wrapped tokenId, it will revert
+        // In case someone tries to skim an already wrapped tokenId, it will revert.
         if (totalSupply(tokenId) > 0) {
             revert TokenIdIsAlreadyWrapped();
         }

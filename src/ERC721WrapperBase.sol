@@ -76,7 +76,7 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         // We want this to happen at the end; otherwise, using the token transfers (especially native ETH transfers) that happen in Uniswap wrappers,
         // a user can reenter and could cause issues.
         _settleFullUnwrap(tokenId, to);
-    }   
+    }
 
     /// @dev Partial unwrap.
     /// @dev The callThroughEVC modifier is needed because we need the actual unwrap to happen before the burning of ERC6909 tokens

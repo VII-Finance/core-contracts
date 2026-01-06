@@ -14,7 +14,7 @@ import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {ActionConstants} from "lib/v4-periphery/src/libraries/ActionConstants.sol";
 import {Currency} from "lib/v4-periphery/lib/v4-core/src/types/Currency.sol";
 
-/// @title EVC aware collateral only vault for Uniswap V3 liquidity positions
+/// @title EVC aware collateral only vault for Uniswap V4 liquidity positions
 /// @author VII Finance
 /// @notice This contract allows EVK vaults to accept Uniswap V4 liquidity positions as collateral
 /// @dev This wrapper is intended exclusively for vanilla Uniswap V4 pools.

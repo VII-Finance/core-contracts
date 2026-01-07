@@ -84,7 +84,6 @@ contract SamplePOC is Test, BaseSetup {
 
         nonFungiblePositionManager.increaseLiquidity(increaseParams);
 
-
         // Enable the tokenId as collateral.
         uniswapV3Wrapper.enableTokenIdAsCollateral(tokenId);
 

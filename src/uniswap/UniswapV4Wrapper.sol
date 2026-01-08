@@ -19,6 +19,7 @@ import {Currency} from "lib/v4-periphery/lib/v4-core/src/types/Currency.sol";
 /// @notice This contract allows EVK vaults to accept Uniswap V4 liquidity positions as collateral
 /// @dev This wrapper is intended exclusively for vanilla Uniswap V4 pools.
 /// @dev This wrapper is compatible with the pools with yield harvesting hook (https://github.com/VII-Finance/yield-harvesting-hook)
+///      Expected behaviour: For pools with yield harvesting hook, the pending yield that is not yet harvested will not be considered in the collateral value.
 /// @dev Before using this for pools with other custom hooks, ensure that the custom hook does not alter how a liquidity position is priced.
 contract UniswapV4Wrapper is ERC721WrapperBase {
     using SafeCast for uint256;

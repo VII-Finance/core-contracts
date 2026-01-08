@@ -147,6 +147,7 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         public
         view
         virtual
+        override
         returns (uint160 sqrtRatioX96)
     {
         uint256 token0UnitValue = oracle.getQuote(unit0, token0, unitOfAccount);

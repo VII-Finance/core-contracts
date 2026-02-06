@@ -43,6 +43,10 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         unitOfAccount = _unitOfAccount;
     }
 
+    function decimals() public view returns (uint8) {
+        return _getDecimals(unitOfAccount);
+    }
+
     function enableTokenIdAsCollateral(uint256 tokenId) public returns (bool enabled) {
         address sender = _msgSender();
         enabled = _enabledTokenIds[sender].add(tokenId);

@@ -30,6 +30,7 @@ contract SamplePOC is Test, BaseSetup {
     // You can pick this up from where we left off and try to exploit this vector.
     // UniswapV4Wrapper doesn't have this potential issue as PositionManager doesn't allow anyone to increase liquidity of a position they don't own.
     // Users have to unwrap the entire position to get back the NFT and then they can increase liquidity, and when they wrap again, they always get minted FULL_AMOUNT of ERC6909 tokens.
+    // update: attacker looses 99.9% of what they donated and that is the reason this attack isn't possible anymore
     function test_1_wei_worth_a_lot_attack_vector() public {
         address attacker = makeAddr("attacker");
         address liquidator = makeAddr("liquidator");
@@ -64,9 +65,9 @@ contract SamplePOC is Test, BaseSetup {
         uniswapV3Wrapper.wrap(tokenId, attacker);
 
         // Attacker partially unwraps all but 1 wei of ERC6909 tokens.
-        uint256 totalSupply = uniswapV3Wrapper.totalSupply(tokenId);
-        uint256 unwrapAmount = totalSupply - 1;
-        uniswapV3Wrapper.unwrap(attacker, tokenId, attacker, unwrapAmount, "");
+        // uint256 totalSupply = uniswapV3Wrapper.totalSupply(tokenId);
+        // uint256 unwrapAmount = totalSupply - 1;
+        uniswapV3Wrapper.unwrap(attacker, tokenId, attacker, uniswapV3Wrapper.FULL_AMOUNT() - 1, "");
 
         // Now attacker has 1 wei of ERC6909 token representing the large position.
         assertEq(uniswapV3Wrapper.balanceOf(attacker, tokenId), 1);
@@ -90,8 +91,12 @@ contract SamplePOC is Test, BaseSetup {
         // Attacker now has a large amount of collateral represented by 1 wei of ERC6909 token.
         uint256 collateralValue = uniswapV3Wrapper.balanceOf(attacker);
 
-        assertEq(collateralValue, 200000 * 10 ** 18, "Collateral value should be significantly larger than 1 wei");
+        assertGt(
+            collateralValue, (190000 * 10 ** 18) / 1e3, "Collateral value should be significantly larger than 1 wei"
+        );
 
         // Complete this attack by finding a rounding error to exploit...
+
+        //update: attacker looses 99.9% of what they donated and that is the reason this attack isn't possible anymore
     }
 }

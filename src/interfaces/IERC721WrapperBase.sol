@@ -7,6 +7,7 @@ import {IPriceOracle} from "src/interfaces/IPriceOracle.sol";
 
 interface IERC721WrapperBase is IPartialERC20 {
     function FULL_AMOUNT() external pure returns (uint256);
+    function MINIMUM_AMOUNT() external pure returns (uint256);
     function MAX_TOKENIDS_ALLOWED() external pure returns (uint256);
     function underlying() external view returns (IERC721);
     function oracle() external view returns (IPriceOracle);

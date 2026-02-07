@@ -193,7 +193,11 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
         {
             uint256 expectedBalance = (amount0InUnitOfAccount + amount1InUnitOfAccount);
 
-            assertApproxEqAbs(wrapper.balanceOf(borrower), expectedBalance, ALLOWED_PRECISION_IN_TESTS);
+            assertApproxEqAbs(
+                wrapper.calculateValueOfTokenId(tokenIdMinted, wrapper.totalSupply(tokenIdMinted)),
+                expectedBalance,
+                ALLOWED_PRECISION_IN_TESTS
+            );
         }
 
         uint256 amount0BalanceBefore = IERC20(token0).balanceOf(borrower);
@@ -210,9 +214,7 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
             tokenId,
             borrower,
             wrapper.FULL_AMOUNT(),
-            abi.encode(
-                (amount0Spent > 0 ? amount0Spent - 1 : 0), (amount1Spent > 0 ? amount1Spent - 1 : 0), block.timestamp
-            )
+            abi.encode(amount0Spent * 9999 / 10_000, amount1Spent * 9999 / 10_000, block.timestamp)
         );
 
         assertEq(IERC20(token0).balanceOf(borrower), amount0BalanceBefore + previewUnwrapAmount0);
@@ -220,8 +222,8 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
 
         assertEq(wrapper.balanceOf(borrower, tokenId), 0);
 
-        assertApproxEqAbs(IERC20(token0).balanceOf(borrower), amount0BalanceBefore + amount0Spent, 1);
-        assertApproxEqAbs(IERC20(token1).balanceOf(borrower), amount1BalanceBefore + amount1Spent, 1);
+        assertApproxEqRel(IERC20(token0).balanceOf(borrower), amount0BalanceBefore + amount0Spent, 1000);
+        assertApproxEqAbs(IERC20(token1).balanceOf(borrower), amount1BalanceBefore + amount1Spent, 1000);
     }
 
     function testFuzzTotalPositionValue(LiquidityParams memory params) public {
@@ -323,7 +325,7 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
         wrapper.wrap(tokenIdMinted, borrower);
         wrapper.enableTokenIdAsCollateral(tokenIdMinted);
 
-        uint256 totalBalanceBefore = wrapper.balanceOf(borrower);
+        uint256 totalBalanceBefore = wrapper.calculateValueOfTokenId(tokenIdMinted, wrapper.totalSupply(tokenIdMinted));
 
         fees0ToDonate = bound(fees0ToDonate, 1, amount0);
         fees1ToDonate = bound(fees1ToDonate, 1, amount1);
@@ -340,7 +342,11 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
         uint256 expectedFeesValue = oracle.getQuote(expectedFees0, token0, unitOfAccount)
             + oracle.getQuote(expectedFees1, token1, unitOfAccount);
 
-        assertApproxEqAbs(wrapper.balanceOf(borrower), totalBalanceBefore + expectedFeesValue, 1);
+        assertApproxEqAbs(
+            wrapper.calculateValueOfTokenId(tokenIdMinted, wrapper.totalSupply(tokenIdMinted)),
+            totalBalanceBefore + expectedFeesValue,
+            1
+        );
 
         //now if a user does partial unwrap feesOwed should be deducted proportionally
 
@@ -356,20 +362,34 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
         }
         wrapper.unwrap(borrower, tokenIdMinted, borrower, partialUnwrapAmount, "");
 
-        assertEq(wrapper.balanceOf(borrower), expectedValueAfter);
-
         if (!isZeroLiquidityDecreased) {
-            (uint256 currentFees0Owed, uint256 currentFees1Owed) =
-                MockUniswapV3Wrapper(payable(address(wrapper))).tokensOwed(tokenIdMinted);
+            assertEq(wrapper.balanceOf(borrower), expectedValueAfter);
 
-            assertEq(currentFees0Owed, expectedFees0 - (expectedFees0 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
-            assertEq(currentFees1Owed, expectedFees1 - (expectedFees1 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
+            if (!isZeroLiquidityDecreased) {
+                (uint256 currentFees0Owed, uint256 currentFees1Owed) =
+                    MockUniswapV3Wrapper(payable(address(wrapper))).tokensOwed(tokenIdMinted);
+
+                assertEq(
+                    currentFees0Owed,
+                    expectedFees0 - (expectedFees0 * partialUnwrapAmount)
+                        / (wrapper.FULL_AMOUNT() + wrapper.MINIMUM_AMOUNT())
+                );
+                assertEq(
+                    currentFees1Owed,
+                    expectedFees1 - (expectedFees1 * partialUnwrapAmount)
+                        / (wrapper.FULL_AMOUNT() + wrapper.MINIMUM_AMOUNT())
+                );
+
+                //full unwrap is not allowed if user doesn't hold FULL_AMOUNT
+                vm.expectRevert();
+                wrapper.unwrap(borrower, tokenIdMinted, borrower);
+
+                //now if a user does full unwrap, the ownership needs to be transferred to the unwraper
+                //the tokensOwned can be non zero but that doesn't matter as this is handled by the nonFungiblePositionManager and not our contracts
+                // wrapper.unwrap(borrower, tokenIdMinted, borrower);
+                // assertEq(wrapper.underlying().ownerOf(tokenIdMinted), borrower);
+            }
         }
-
-        //now if a user does full unwrap, the ownership needs to be transferred to the unwraper
-        //the tokensOwned can be non zero but that doesn't matter as this is handled by the nonFungiblePositionManager and not our contracts
-        wrapper.unwrap(borrower, tokenIdMinted, borrower);
-        assertEq(wrapper.underlying().ownerOf(tokenIdMinted), borrower);
     }
 
     function testFuzzTransfer(LiquidityParams memory params, uint256 swapAmount, uint256 transferAmount) public {

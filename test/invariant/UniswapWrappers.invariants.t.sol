@@ -34,7 +34,7 @@ contract UniswapWrappersInvariants is Test {
             : IMockUniswapWrapper(address(handler.uniswapV4Wrapper()));
     }
 
-    //make sure totalSupply of any tokenId is in uniswapV4Wrapper is not greater than FULL_AMOUNT
+    //make sure totalSupply of any tokenId is in uniswapV4Wrapper is not greater than FULL_AMOUNT + MINIMUM_AMOUNT
     function assertTotalSupplyNotGreaterThanFullAmount(bool isV3) public view {
         for (uint256 i = 0; i < handler.actorsLength(); i++) {
             address actor = handler.actors(i);
@@ -46,7 +46,10 @@ contract UniswapWrappersInvariants is Test {
                 if (!isWrapped) {
                     continue;
                 }
-                assertLe(getUniswapWrapper(isV3).totalSupply(tokenId), getUniswapWrapper(isV3).FULL_AMOUNT());
+                assertLe(
+                    getUniswapWrapper(isV3).totalSupply(tokenId),
+                    getUniswapWrapper(isV3).FULL_AMOUNT() + getUniswapWrapper(isV3).MINIMUM_AMOUNT()
+                );
             }
         }
     }
@@ -67,6 +70,9 @@ contract UniswapWrappersInvariants is Test {
                 totalBalance += getUniswapWrapper(isV3).balanceOf(user, tokenId);
             }
             uint256 total6909Supply = getUniswapWrapper(isV3).totalSupply(tokenId);
+            if (total6909Supply > 0) {
+                totalBalance += getUniswapWrapper(isV3).MINIMUM_AMOUNT(); //MINIMUM_AMOUNT is always held by the address(1) if full unwrap is not done yet
+            }
             assertEq(totalBalance, total6909Supply, "Total 6909 supply does not equal sum of balances");
         }
     }

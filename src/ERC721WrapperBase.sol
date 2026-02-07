@@ -181,6 +181,11 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
     /// @dev assumes that the tokenId is already owned by this address
     function _wrap(uint256 tokenId, address to) private {
         validatePosition(tokenId);
+
+        // In case someone tries to wrap an already wrapped tokenId, it will revert
+        if (totalSupply(tokenId) > 0) {
+            revert TokenIdIsAlreadyWrapped();
+        }
         _mint(to, tokenId, FULL_AMOUNT);
         _mint(address(1), tokenId, MINIMUM_AMOUNT);
     }
@@ -265,10 +270,6 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         // In case the tokenId is not owned by this contract already, it will revert.
         if (underlying.ownerOf(tokenId) != address(this)) {
             revert TokenIdNotOwnedByThisContract();
-        }
-        // In case someone tries to skim an already wrapped tokenId, it will revert.
-        if (totalSupply(tokenId) > 0) {
-            revert TokenIdIsAlreadyWrapped();
         }
         _wrap(tokenId, to);
     }

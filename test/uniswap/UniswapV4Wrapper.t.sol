@@ -17,6 +17,7 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IEVault} from "lib/euler-interfaces/interfaces/IEVault.sol";
 import {IPriceOracle} from "src/interfaces/IPriceOracle.sol";
 import {Actions} from "lib/v4-periphery/src/libraries/Actions.sol";
+import {ISubscriber} from "lib/v4-periphery/src/interfaces/ISubscriber.sol";
 import {IERC20Metadata} from "lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import {LiquidityAmounts} from "lib/v3-periphery/contracts/libraries/LiquidityAmounts.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
@@ -42,7 +43,7 @@ import {ActionConstants} from "lib/v4-periphery/src/libraries/ActionConstants.so
 import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {MockUniswapV4Wrapper} from "test/helpers/MockUniswapV4Wrapper.sol";
 
-contract UniswapV4WrapperTest is Test, UniswapBaseTest {
+contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
     using StateLibrary for IPoolManager;
     using BalanceDeltaLibrary for BalanceDelta;
 
@@ -550,4 +551,24 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         wrapper.unwrap(borrower, tokenId, borrower, wrapper.FULL_AMOUNT(), "");
         vm.stopPrank();
     }
+
+    function test_useSubUnSubScribeToSkimPlusWrap() public {
+        positionManager.subscribe(tokenId, address(this), "");
+
+        wrapper.underlying().approve(address(wrapper), tokenId);
+        vm.expectRevert(ERC721WrapperBase.TokenIdIsAlreadyWrapped.selector);
+        wrapper.wrap(tokenId, address(this));
+    }
+
+    // This is demo for how someone can reenter using v4 subscription
+    function notifyUnsubscribe(uint256) external {
+        // when transferFrom is happening for wrapping, reenter and try to do the skim
+        wrapper.skim(address(this));
+    }
+    function notifySubscribe(uint256 tokenId, bytes memory data) external {}
+
+    function notifyBurn(uint256 tokenId, address owner, PositionInfo info, uint256 liquidity, BalanceDelta feesAccrued)
+        external {}
+
+    function notifyModifyLiquidity(uint256 tokenId, int256 liquidityChange, BalanceDelta feesAccrued) external {}
 }

@@ -14,7 +14,6 @@ import {UniswapPositionValueHelper} from "src/libraries/UniswapPositionValueHelp
 /// @title EVC aware collateral only vault for Uniswap V3 liquidity positions
 /// @author VII Finance
 /// @notice This contract allows EVK vaults to accept Uniswap V3 liquidity positions as collateral
-/// @notice For now, we won't support Uniswap V3 because it requires non trivial work to fix the bug found in the last audit
 contract UniswapV3Wrapper is ERC721WrapperBase {
     IUniswapV3Pool public immutable pool;
     IUniswapV3Factory public immutable factory;

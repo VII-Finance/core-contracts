@@ -161,7 +161,8 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         uint256 token0UnitValue = getQuote(unit0, token0);
         uint256 token1UnitValue = getQuote(unit1, token1);
 
-        sqrtRatioX96 = SafeCast.toUint160(Math.sqrt(token0UnitValue * (1 << 96) / token1UnitValue) << 48);
+        sqrtRatioX96 =
+            SafeCast.toUint160(Math.sqrt(token0UnitValue * unit1 * (1 << 96) / (token1UnitValue * unit0)) << 48);
     }
 
     function getEnabledTokenIds(address owner) external view returns (uint256[] memory) {

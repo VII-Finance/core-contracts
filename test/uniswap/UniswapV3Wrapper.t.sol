@@ -11,7 +11,7 @@ import {IPriceOracle} from "lib/euler-price-oracle/src/interfaces/IPriceOracle.s
 import {INonfungiblePositionManager} from "lib/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
 import {FixedRateOracle} from "lib/euler-price-oracle/src/adapter/fixed/FixedRateOracle.sol";
 import {IEulerRouter} from "lib/euler-interfaces/interfaces/IEulerRouter.sol";
-import {Test} from "forge-std/Test.sol";
+import {Test, console} from "forge-std/Test.sol";
 import {IERC20Metadata} from "lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import {ERC721WrapperBase} from "src/ERC721WrapperBase.sol";
 import {UniswapBaseTest} from "test/uniswap/UniswapBase.t.sol";
@@ -128,18 +128,13 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
     }
 
     function testGetSqrtRatioX96() public view {
-        uint256 fixedDecimals = 10 ** 18;
-        uint160 sqrtRatioX96FromOracle = MockUniswapV3Wrapper(address(wrapper))
-            .getSqrtRatioX96FromOracle(address(token0), address(token1), unit0, unit1);
+        sqrtPriceTest(2484634903, Addresses.WETH, Addresses.USDC); //2.4k USDC per ETH
+        sqrtPriceTest(103283676033, Addresses.WBTC, Addresses.USDC); //103k BTC per USDC
 
-        uint256 sqrtPriceInFixed18Decimal = Math.mulDiv(sqrtRatioX96FromOracle, fixedDecimals, 1 << 96);
-        uint256 priceInFixed18Decimal = Math.mulDiv(sqrtPriceInFixed18Decimal, sqrtPriceInFixed18Decimal, fixedDecimals);
+        sqrtPriceTest(41568954820846990734, Addresses.WBTC, Addresses.WETH); //41.56 BTC per ETH
 
-        uint256 token0PerToken1InFixed18Decimal = Math.mulDiv(
-            oracle.getQuote(unit0, token0, unitOfAccount), fixedDecimals, oracle.getQuote(unit1, token1, unitOfAccount)
-        );
-
-        assertApproxEqAbs(priceInFixed18Decimal, token0PerToken1InFixed18Decimal, 1e4);
+        sqrtPriceTest(2484754836, Addresses.WETH, Addresses.USDT); //2.4k USDC per ETH
+        sqrtPriceTest(103288661536, Addresses.WBTC, Addresses.USDT); //103k BTC per USDC
     }
 
     function testWrapFailIfNotTheSamePoolAddress() public {

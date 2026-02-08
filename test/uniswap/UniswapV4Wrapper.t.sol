@@ -252,19 +252,13 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
     }
 
     function testGetSqrtRatioX96() public view {
-        uint256 fixedDecimals = 10 ** 18;
-        uint160 sqrtRatioX96FromOracle = MockUniswapV4Wrapper(payable(address(wrapper)))
-            .getSqrtRatioX96FromOracle(address(token0), address(token1), unit0, unit1);
+        sqrtPriceTest(2484634903, Addresses.WETH, Addresses.USDC); //2.4k USDC per ETH
+        sqrtPriceTest(103283676033, Addresses.WBTC, Addresses.USDC); //103k BTC per USDC
 
-        uint256 sqrtPriceInFixed18Decimal = Math.mulDiv(sqrtRatioX96FromOracle, fixedDecimals, 1 << 96);
+        sqrtPriceTest(41568954820846990734, Addresses.WBTC, Addresses.WETH); //41.56 BTC per ETH
 
-        uint256 priceInFixed18Decimal = Math.mulDiv(sqrtPriceInFixed18Decimal, sqrtPriceInFixed18Decimal, fixedDecimals);
-
-        uint256 token0PerToken1InFixed18Decimal = Math.mulDiv(
-            oracle.getQuote(unit0, token0, unitOfAccount), fixedDecimals, oracle.getQuote(unit1, token1, unitOfAccount)
-        );
-
-        assertApproxEqAbs(priceInFixed18Decimal, token0PerToken1InFixed18Decimal, 1e6);
+        sqrtPriceTest(2484754836, Addresses.WETH, Addresses.USDT); //2.4k USDC per ETH
+        sqrtPriceTest(103288661536, Addresses.WBTC, Addresses.USDT); //103k BTC per USDC
     }
 
     function testWrapFailIfNotTheSamePoolId() public {

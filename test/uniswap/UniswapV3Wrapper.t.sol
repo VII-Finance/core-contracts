@@ -430,4 +430,69 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
     function test_basicLiquidation() public {
         basicLiquidationTest();
     }
+
+    function test_liquidation_not_blocked_by_zero_liquidity_position() public {
+        address attacker = makeAddr("attacker");
+        address victim = makeAddr("victim");
+
+        deal(address(token0), attacker, 5_000 * unit0);
+        deal(address(token1), attacker, 5_000 * unit1);
+
+        vm.startPrank(attacker);
+        SafeERC20.forceApprove(IERC20(token0), address(nonFungiblePositionManager), type(uint256).max);
+        SafeERC20.forceApprove(IERC20(token1), address(nonFungiblePositionManager), type(uint256).max);
+
+        INonfungiblePositionManager.MintParams memory mintParams = INonfungiblePositionManager.MintParams({
+            token0: address(token0),
+            token1: address(token1),
+            fee: fee,
+            tickLower: -60,
+            tickUpper: 60,
+            amount0Desired: 2_000 * unit0,
+            amount1Desired: 2_000 * unit1,
+            amount0Min: 0,
+            amount1Min: 0,
+            recipient: attacker,
+            deadline: block.timestamp + 3600
+        });
+
+        (uint256 positionId, uint128 positionLiquidity,,) = nonFungiblePositionManager.mint(mintParams);
+
+        nonFungiblePositionManager.decreaseLiquidity(
+            INonfungiblePositionManager.DecreaseLiquidityParams({
+                tokenId: positionId,
+                liquidity: positionLiquidity,
+                amount0Min: 0,
+                amount1Min: 0,
+                deadline: block.timestamp + 3600
+            })
+        );
+
+        (,,,,,,, uint128 remainingLiquidity,,, uint256 owed0, uint256 owed1) =
+            nonFungiblePositionManager.positions(positionId);
+        assertEq(remainingLiquidity, 0);
+        assertTrue(owed0 > 0 && owed1 > 0);
+
+        nonFungiblePositionManager.approve(address(wrapper), positionId);
+        wrapper.wrap(positionId, attacker);
+        wrapper.enableTokenIdAsCollateral(positionId);
+
+        uint256 attackerBalance = wrapper.balanceOf(attacker, positionId);
+        assertTrue(attackerBalance > 0);
+
+        wrapper.transfer(victim, positionId, 100);
+
+        uint256 remainingShares = wrapper.balanceOf(attacker, positionId);
+        wrapper.transfer(address(liquidator), positionId, remainingShares);
+        vm.stopPrank();
+
+        vm.startPrank(address(liquidator));
+
+        uint256 liquidatorShares = wrapper.balanceOf(address(liquidator), positionId);
+        assertTrue(liquidatorShares > 0);
+        assertTrue(liquidatorShares < wrapper.FULL_AMOUNT());
+
+        // this succeeds even thought liquidity being removed is zero (as it should)
+        wrapper.unwrap(address(liquidator), positionId, address(liquidator), liquidatorShares, "");
+    }
 }

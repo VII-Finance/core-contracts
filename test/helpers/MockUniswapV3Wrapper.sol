@@ -94,26 +94,34 @@ contract MockUniswapV3Wrapper is UniswapV3Wrapper {
             return true;
         }
 
-        (,,,,, int24 tickLower, int24 tickUpper, uint128 liquidity,,,,) =
+        (,,,,, int24 tickLower, int24 tickUpper, uint128 liquidity,,, uint128 tokensOwed0, uint128 tokensOwed1) =
             INonfungiblePositionManager(address(underlying)).positions(tokenId);
-        uint128 liquidityToRemove = uint128(proportionalShare(liquidity, unwrapAmount, totalSupply(tokenId)));
-
-        if (liquidityToRemove == 0) {
-            return true;
-        }
 
         // also make sure amount0 and amount1 resulting from liquidityToRemove is not zero either
         // call to collect it will fail otherwise
-        (uint160 sqrtRatioX96,,,,,,) = pool.slot0();
-        (uint256 amount0, uint256 amount1) =
-            UniswapPositionValueHelper.principal(sqrtRatioX96, tickLower, tickUpper, liquidityToRemove);
+        bool areAmountsZero;
+        {
+            uint128 liquidityToRemove = uint128(proportionalShare(liquidity, unwrapAmount, totalSupply(tokenId)));
+            (uint160 sqrtRatioX96,,,,,,) = pool.slot0();
+
+            // if liquidityToRemove is zero we have updated the code so that it won't fail (we don't call decreaseLiquidity)
+            // but if amount to be collected is zero, .collect will still fail
+            // if (liquidityToRemove == 0) {
+            //     return true;
+            // }
+
+            (uint256 amount0, uint256 amount1) =
+                UniswapPositionValueHelper.principal(sqrtRatioX96, tickLower, tickUpper, liquidityToRemove);
+
+            areAmountsZero = amount0 == 0 && amount1 == 0;
+        }
 
         //even if amount0 and amount1 are both zero, if user's share of pending fees is non-zero, collect will still succeed
         (uint256 totalPendingFees0, uint256 totalPendingFees1) = pendingFees(tokenId);
 
-        return (amount0 == 0 && amount1 == 0
-                && proportionalShare(totalPendingFees0, unwrapAmount, totalSupply(tokenId)) == 0
-                && proportionalShare(totalPendingFees1, unwrapAmount, totalSupply(tokenId)) == 0);
+        return (areAmountsZero
+                && proportionalShare(tokensOwed0 + totalPendingFees0, unwrapAmount, totalSupply(tokenId)) == 0
+                && proportionalShare(tokensOwed1 + totalPendingFees1, unwrapAmount, totalSupply(tokenId)) == 0);
     }
 
     struct Local {

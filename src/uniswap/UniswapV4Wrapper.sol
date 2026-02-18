@@ -138,24 +138,24 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
         tokensOwed[tokenId] = feesOwed;
 
-        currency1.transfer(to, amount1 + fees1ToSend);
+        uint256 currency1AmountToTransfer = amount1 + fees1ToSend;
+        uint256 currency0AmountToTransfer = amount0 + fees0ToSend;
+
+        if (currency1AmountToTransfer > 0) currency1.transfer(to, amount1 + fees1ToSend);
         // currency0 can be native ETH, where we know for sure that reentrancy is possible.
         // We keep this transfer at the very end of the action to minimize risk.
-        currency0.transfer(to, amount0 + fees0ToSend);
+        if (currency0AmountToTransfer > 0) currency0.transfer(to, amount0 + fees0ToSend);
     }
 
     function _settleFullUnwrap(uint256 tokenId, address to) internal override {
         uint256 fees0ToSend = tokensOwed[tokenId].fees0Owed;
         uint256 fees1ToSend = tokensOwed[tokenId].fees1Owed;
         delete tokensOwed[tokenId];
-        if (fees1ToSend != 0) {
-            currency1.transfer(to, fees1ToSend);
-        }
-        if (fees0ToSend != 0) {
-            // currency0 can be native ETH, where we know for sure that reentrancy is possible.
-            // We keep this transfer at the very end of the action to minimize risk.
-            currency0.transfer(to, fees0ToSend);
-        }
+        if (fees1ToSend > 0) currency1.transfer(to, fees1ToSend);
+
+        // currency0 can be native ETH, where we know for sure that reentrancy is possible.
+        // We keep this transfer at the very end of the action to minimize risk.
+        if (fees0ToSend > 0) currency0.transfer(to, fees0ToSend);
     }
 
     /// @notice Calculates the proportional value of a position in unit of account terms

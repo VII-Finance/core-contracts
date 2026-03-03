@@ -14,7 +14,8 @@ import {IERC20Metadata} from "lib/openzeppelin-contracts/contracts/token/ERC20/e
 import {SafeCast} from "lib/v4-periphery/lib/v4-core/src/libraries/SafeCast.sol";
 
 abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721WrapperBase {
-    uint256 public constant FULL_AMOUNT = 1e36;
+    uint256 public constant FULL_AMOUNT = 1e33;
+    uint256 public constant MINIMUM_AMOUNT = 1e3;
     uint256 public constant MAX_TOKENIDS_ALLOWED = 7;
 
     IERC721 public immutable override underlying;
@@ -41,6 +42,10 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         underlying = IERC721(_underlying);
         oracle = IPriceOracle(_oracle);
         unitOfAccount = _unitOfAccount;
+    }
+
+    function decimals() public view returns (uint8) {
+        return _getDecimals(unitOfAccount);
     }
 
     function enableTokenIdAsCollateral(uint256 tokenId) public returns (bool enabled) {
@@ -71,7 +76,11 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
     ///      account status check happens. The actual NFT transfer doesn't really matter in Uniswap wrappers case. We have still kept it so that account status checks
     ///      only happen at the end of the action for future wrappers where it might be needed.
     function unwrap(address from, uint256 tokenId, address to) external callThroughEVC {
-        _burnFrom(from, tokenId, totalSupply(tokenId));
+        // if you have the FULL_AMOUNT then and only then you will be able to do full unwrap
+        // otherwise, you will have to do the partial unwrap
+        _burnFrom(from, tokenId, FULL_AMOUNT);
+        // no need to check for allowance. This is just to zero out the total supply
+        _burn(address(1), tokenId, MINIMUM_AMOUNT);
         underlying.transferFrom(address(this), to, tokenId);
         // We want this to happen at the end; otherwise, using the token transfers (especially native ETH transfers) that happen in Uniswap wrappers,
         // a user can reenter and could cause issues.
@@ -149,10 +158,11 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         virtual
         returns (uint160 sqrtRatioX96)
     {
-        uint256 token0UnitValue = oracle.getQuote(unit0, token0, unitOfAccount);
-        uint256 token1UnitValue = oracle.getQuote(unit1, token1, unitOfAccount);
+        uint256 token0UnitValue = getQuote(unit0, token0);
+        uint256 token1UnitValue = getQuote(unit1, token1);
 
-        sqrtRatioX96 = SafeCast.toUint160(Math.sqrt(token0UnitValue * (1 << 96) / token1UnitValue) << 48);
+        sqrtRatioX96 =
+            SafeCast.toUint160(Math.sqrt(token0UnitValue * unit1 * (1 << 96) / (token1UnitValue * unit0)) << 48);
     }
 
     function getEnabledTokenIds(address owner) external view returns (uint256[] memory) {
@@ -172,7 +182,13 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
     /// @dev assumes that the tokenId is already owned by this address
     function _wrap(uint256 tokenId, address to) private {
         validatePosition(tokenId);
+
+        // In case someone tries to wrap an already wrapped tokenId, it will revert
+        if (totalSupply(tokenId) > 0) {
+            revert TokenIdIsAlreadyWrapped();
+        }
         _mint(to, tokenId, FULL_AMOUNT);
+        _mint(address(1), tokenId, MINIMUM_AMOUNT);
     }
 
     function _unwrap(
@@ -255,10 +271,6 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         // In case the tokenId is not owned by this contract already, it will revert.
         if (underlying.ownerOf(tokenId) != address(this)) {
             revert TokenIdNotOwnedByThisContract();
-        }
-        // In case someone tries to skim an already wrapped tokenId, it will revert.
-        if (totalSupply(tokenId) > 0) {
-            revert TokenIdIsAlreadyWrapped();
         }
         _wrap(tokenId, to);
     }

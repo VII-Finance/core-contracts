@@ -106,19 +106,21 @@ contract UniswapV3Wrapper is ERC721WrapperBase {
         internal
         returns (uint256 amount0, uint256 amount1)
     {
-        (uint256 amount0Min, uint256 amount1Min, uint256 deadline) =
-            extraData.length == 96 ? abi.decode(extraData, (uint256, uint256, uint256)) : (0, 0, block.timestamp);
+        if (liquidity != 0) {
+            (uint256 amount0Min, uint256 amount1Min, uint256 deadline) =
+                extraData.length == 96 ? abi.decode(extraData, (uint256, uint256, uint256)) : (0, 0, block.timestamp);
 
-        (amount0, amount1) = INonfungiblePositionManager(address(underlying))
-            .decreaseLiquidity(
-                INonfungiblePositionManager.DecreaseLiquidityParams({
-                    tokenId: tokenId,
-                    liquidity: liquidity,
-                    amount0Min: amount0Min,
-                    amount1Min: amount1Min,
-                    deadline: deadline
-                })
-            );
+            (amount0, amount1) = INonfungiblePositionManager(address(underlying))
+                .decreaseLiquidity(
+                    INonfungiblePositionManager.DecreaseLiquidityParams({
+                        tokenId: tokenId,
+                        liquidity: liquidity,
+                        amount0Min: amount0Min,
+                        amount1Min: amount1Min,
+                        deadline: deadline
+                    })
+                );
+        }
     }
 
     /// @dev Returns the last tokenId owned by this contract from the NonFungiblePositionManager,

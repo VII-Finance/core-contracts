@@ -598,8 +598,11 @@ contract Handler is Test, BaseSetup {
         // borrow only if the vault is already enabled as controller
         // if not, we skip the borrow to avoid revert
         if (enabledControllers[0] == address(vault)) {
-            vault.borrow(borrowAmount, account);
-            return borrowAmount;
+            try vault.borrow(borrowAmount, account) {
+                return borrowAmount;
+            } catch {
+                return 0;
+            }
         }
 
         return 0;

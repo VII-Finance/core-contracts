@@ -107,6 +107,7 @@ contract ERC721WrapperBaseTest is Test {
 
         assertEq(underlying.ownerOf(tokenId), address(wrapper));
         assertEq(wrapper.balanceOf(to, tokenId), wrapper.FULL_AMOUNT());
+        assertEq(wrapper.balanceOf(address(1), tokenId), wrapper.MINIMUM_AMOUNT());
     }
 
     function test_wrap(uint256 tokenId) public {
@@ -165,7 +166,7 @@ contract ERC721WrapperBaseTest is Test {
         assertEq(enabledTokenIds[0], 1);
 
         //if user splits tokenId then the balance should be be decreased as well
-        assertTrue(wrapper.transfer(address(1), wrapper.FULL_AMOUNT()));
+        assertTrue(wrapper.transfer(address(2), wrapper.FULL_AMOUNT()));
         assertEq(wrapper.balanceOf(address(this)), wrapper.FULL_AMOUNT());
     }
 }

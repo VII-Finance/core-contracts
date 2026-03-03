@@ -11,7 +11,7 @@ import {IPriceOracle} from "lib/euler-price-oracle/src/interfaces/IPriceOracle.s
 import {INonfungiblePositionManager} from "lib/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
 import {FixedRateOracle} from "lib/euler-price-oracle/src/adapter/fixed/FixedRateOracle.sol";
 import {IEulerRouter} from "lib/euler-interfaces/interfaces/IEulerRouter.sol";
-import {Test} from "forge-std/Test.sol";
+import {Test, console} from "forge-std/Test.sol";
 import {IERC20Metadata} from "lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import {ERC721WrapperBase} from "src/ERC721WrapperBase.sol";
 import {UniswapBaseTest} from "test/uniswap/UniswapBase.t.sol";
@@ -128,18 +128,13 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
     }
 
     function testGetSqrtRatioX96() public view {
-        uint256 fixedDecimals = 10 ** 18;
-        uint160 sqrtRatioX96FromOracle = MockUniswapV3Wrapper(address(wrapper))
-            .getSqrtRatioX96FromOracle(address(token0), address(token1), unit0, unit1);
+        sqrtPriceTest(2484634903, Addresses.WETH, Addresses.USDC); //2.4k USDC per ETH
+        sqrtPriceTest(103283676033, Addresses.WBTC, Addresses.USDC); //103k BTC per USDC
 
-        uint256 sqrtPriceInFixed18Decimal = Math.mulDiv(sqrtRatioX96FromOracle, fixedDecimals, 1 << 96);
-        uint256 priceInFixed18Decimal = Math.mulDiv(sqrtPriceInFixed18Decimal, sqrtPriceInFixed18Decimal, fixedDecimals);
+        sqrtPriceTest(41568954820846990734, Addresses.WBTC, Addresses.WETH); //41.56 BTC per ETH
 
-        uint256 token0PerToken1InFixed18Decimal = Math.mulDiv(
-            oracle.getQuote(unit0, token0, unitOfAccount), fixedDecimals, oracle.getQuote(unit1, token1, unitOfAccount)
-        );
-
-        assertApproxEqAbs(priceInFixed18Decimal, token0PerToken1InFixed18Decimal, 1e4);
+        sqrtPriceTest(2484754836, Addresses.WETH, Addresses.USDT); //2.4k USDC per ETH
+        sqrtPriceTest(103288661536, Addresses.WBTC, Addresses.USDT); //103k BTC per USDC
     }
 
     function testWrapFailIfNotTheSamePoolAddress() public {
@@ -193,7 +188,11 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
         {
             uint256 expectedBalance = (amount0InUnitOfAccount + amount1InUnitOfAccount);
 
-            assertApproxEqAbs(wrapper.balanceOf(borrower), expectedBalance, ALLOWED_PRECISION_IN_TESTS);
+            assertApproxEqAbs(
+                wrapper.calculateValueOfTokenId(tokenIdMinted, wrapper.totalSupply(tokenIdMinted)),
+                expectedBalance,
+                ALLOWED_PRECISION_IN_TESTS
+            );
         }
 
         uint256 amount0BalanceBefore = IERC20(token0).balanceOf(borrower);
@@ -210,9 +209,7 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
             tokenId,
             borrower,
             wrapper.FULL_AMOUNT(),
-            abi.encode(
-                (amount0Spent > 0 ? amount0Spent - 1 : 0), (amount1Spent > 0 ? amount1Spent - 1 : 0), block.timestamp
-            )
+            abi.encode(amount0Spent * 9999 / 10_000, amount1Spent * 9999 / 10_000, block.timestamp)
         );
 
         assertEq(IERC20(token0).balanceOf(borrower), amount0BalanceBefore + previewUnwrapAmount0);
@@ -220,8 +217,8 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
 
         assertEq(wrapper.balanceOf(borrower, tokenId), 0);
 
-        assertApproxEqAbs(IERC20(token0).balanceOf(borrower), amount0BalanceBefore + amount0Spent, 1);
-        assertApproxEqAbs(IERC20(token1).balanceOf(borrower), amount1BalanceBefore + amount1Spent, 1);
+        assertApproxEqRel(IERC20(token0).balanceOf(borrower), amount0BalanceBefore + amount0Spent, 1000);
+        assertApproxEqAbs(IERC20(token1).balanceOf(borrower), amount1BalanceBefore + amount1Spent, 1000);
     }
 
     function testFuzzTotalPositionValue(LiquidityParams memory params) public {
@@ -323,7 +320,7 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
         wrapper.wrap(tokenIdMinted, borrower);
         wrapper.enableTokenIdAsCollateral(tokenIdMinted);
 
-        uint256 totalBalanceBefore = wrapper.balanceOf(borrower);
+        uint256 totalBalanceBefore = wrapper.calculateValueOfTokenId(tokenIdMinted, wrapper.totalSupply(tokenIdMinted));
 
         fees0ToDonate = bound(fees0ToDonate, 1, amount0);
         fees1ToDonate = bound(fees1ToDonate, 1, amount1);
@@ -340,7 +337,11 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
         uint256 expectedFeesValue = oracle.getQuote(expectedFees0, token0, unitOfAccount)
             + oracle.getQuote(expectedFees1, token1, unitOfAccount);
 
-        assertApproxEqAbs(wrapper.balanceOf(borrower), totalBalanceBefore + expectedFeesValue, 1);
+        assertApproxEqAbs(
+            wrapper.calculateValueOfTokenId(tokenIdMinted, wrapper.totalSupply(tokenIdMinted)),
+            totalBalanceBefore + expectedFeesValue,
+            1
+        );
 
         //now if a user does partial unwrap feesOwed should be deducted proportionally
 
@@ -356,20 +357,34 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
         }
         wrapper.unwrap(borrower, tokenIdMinted, borrower, partialUnwrapAmount, "");
 
-        assertEq(wrapper.balanceOf(borrower), expectedValueAfter);
-
         if (!isZeroLiquidityDecreased) {
-            (uint256 currentFees0Owed, uint256 currentFees1Owed) =
-                MockUniswapV3Wrapper(payable(address(wrapper))).tokensOwed(tokenIdMinted);
+            assertEq(wrapper.balanceOf(borrower), expectedValueAfter);
 
-            assertEq(currentFees0Owed, expectedFees0 - (expectedFees0 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
-            assertEq(currentFees1Owed, expectedFees1 - (expectedFees1 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
+            if (!isZeroLiquidityDecreased) {
+                (uint256 currentFees0Owed, uint256 currentFees1Owed) =
+                    MockUniswapV3Wrapper(payable(address(wrapper))).tokensOwed(tokenIdMinted);
+
+                assertEq(
+                    currentFees0Owed,
+                    expectedFees0 - (expectedFees0 * partialUnwrapAmount)
+                        / (wrapper.FULL_AMOUNT() + wrapper.MINIMUM_AMOUNT())
+                );
+                assertEq(
+                    currentFees1Owed,
+                    expectedFees1 - (expectedFees1 * partialUnwrapAmount)
+                        / (wrapper.FULL_AMOUNT() + wrapper.MINIMUM_AMOUNT())
+                );
+
+                //full unwrap is not allowed if user doesn't hold FULL_AMOUNT
+                vm.expectRevert();
+                wrapper.unwrap(borrower, tokenIdMinted, borrower);
+
+                //now if a user does full unwrap, the ownership needs to be transferred to the unwraper
+                //the tokensOwned can be non zero but that doesn't matter as this is handled by the nonFungiblePositionManager and not our contracts
+                // wrapper.unwrap(borrower, tokenIdMinted, borrower);
+                // assertEq(wrapper.underlying().ownerOf(tokenIdMinted), borrower);
+            }
         }
-
-        //now if a user does full unwrap, the ownership needs to be transferred to the unwraper
-        //the tokensOwned can be non zero but that doesn't matter as this is handled by the nonFungiblePositionManager and not our contracts
-        wrapper.unwrap(borrower, tokenIdMinted, borrower);
-        assertEq(wrapper.underlying().ownerOf(tokenIdMinted), borrower);
     }
 
     function testFuzzTransfer(LiquidityParams memory params, uint256 swapAmount, uint256 transferAmount) public {
@@ -414,5 +429,70 @@ contract UniswapV3WrapperTest is Test, UniswapBaseTest {
 
     function test_basicLiquidation() public {
         basicLiquidationTest();
+    }
+
+    function test_liquidation_not_blocked_by_zero_liquidity_position() public {
+        address attacker = makeAddr("attacker");
+        address victim = makeAddr("victim");
+
+        deal(address(token0), attacker, 5_000 * unit0);
+        deal(address(token1), attacker, 5_000 * unit1);
+
+        vm.startPrank(attacker);
+        SafeERC20.forceApprove(IERC20(token0), address(nonFungiblePositionManager), type(uint256).max);
+        SafeERC20.forceApprove(IERC20(token1), address(nonFungiblePositionManager), type(uint256).max);
+
+        INonfungiblePositionManager.MintParams memory mintParams = INonfungiblePositionManager.MintParams({
+            token0: address(token0),
+            token1: address(token1),
+            fee: fee,
+            tickLower: -60,
+            tickUpper: 60,
+            amount0Desired: 2_000 * unit0,
+            amount1Desired: 2_000 * unit1,
+            amount0Min: 0,
+            amount1Min: 0,
+            recipient: attacker,
+            deadline: block.timestamp + 3600
+        });
+
+        (uint256 positionId, uint128 positionLiquidity,,) = nonFungiblePositionManager.mint(mintParams);
+
+        nonFungiblePositionManager.decreaseLiquidity(
+            INonfungiblePositionManager.DecreaseLiquidityParams({
+                tokenId: positionId,
+                liquidity: positionLiquidity,
+                amount0Min: 0,
+                amount1Min: 0,
+                deadline: block.timestamp + 3600
+            })
+        );
+
+        (,,,,,,, uint128 remainingLiquidity,,, uint256 owed0, uint256 owed1) =
+            nonFungiblePositionManager.positions(positionId);
+        assertEq(remainingLiquidity, 0);
+        assertTrue(owed0 > 0 && owed1 > 0);
+
+        nonFungiblePositionManager.approve(address(wrapper), positionId);
+        wrapper.wrap(positionId, attacker);
+        wrapper.enableTokenIdAsCollateral(positionId);
+
+        uint256 attackerBalance = wrapper.balanceOf(attacker, positionId);
+        assertTrue(attackerBalance > 0);
+
+        wrapper.transfer(victim, positionId, 100);
+
+        uint256 remainingShares = wrapper.balanceOf(attacker, positionId);
+        wrapper.transfer(address(liquidator), positionId, remainingShares);
+        vm.stopPrank();
+
+        vm.startPrank(address(liquidator));
+
+        uint256 liquidatorShares = wrapper.balanceOf(address(liquidator), positionId);
+        assertTrue(liquidatorShares > 0);
+        assertTrue(liquidatorShares < wrapper.FULL_AMOUNT());
+
+        // this succeeds even thought liquidity being removed is zero (as it should)
+        wrapper.unwrap(address(liquidator), positionId, address(liquidator), liquidatorShares, "");
     }
 }

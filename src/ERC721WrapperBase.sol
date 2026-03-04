@@ -14,7 +14,7 @@ import {IERC20Metadata} from "lib/openzeppelin-contracts/contracts/token/ERC20/e
 import {SafeCast} from "lib/v4-periphery/lib/v4-core/src/libraries/SafeCast.sol";
 
 abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721WrapperBase {
-    uint256 public constant FULL_AMOUNT = 1e33;
+    uint256 public constant FULL_AMOUNT = 1e36 - MINIMUM_AMOUNT;
     uint256 public constant MINIMUM_AMOUNT = 1e3;
     uint256 public constant MAX_TOKENIDS_ALLOWED = 7;
 

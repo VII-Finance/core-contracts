@@ -69,7 +69,7 @@ contract Handler is Test, BaseSetup {
     //If this is false than turn on the fail on revert flag in foundry.toml as well
     //Turning this flag to false would mean that the fuzzer will be able to do it's more without a lot of restrictions
     //If it is true, then the fuzzer will be more constrained but the invariant tests will also work as "fuzz" tests
-    bool internal constant FAIL_ON_REVERT = true;
+    bool internal constant FAIL_ON_REVERT = false;
 
     modifier useActor(uint256 actorIndexSeed) {
         currentActor = actors[bound(actorIndexSeed, 0, actors.length - 1)];

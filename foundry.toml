@@ -16,7 +16,7 @@ runs = 10
 [invariant]
 runs = 100_000
 depth = 70
-fail_on_revert = false
+fail_on_revert = true
 
 [rpc_endpoints]
 mainnet = "${MAINNET_RPC_URL}" 

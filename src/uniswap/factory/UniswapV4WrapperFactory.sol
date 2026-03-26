@@ -20,7 +20,7 @@ contract UniswapV4WrapperFactory is BaseUniswapWrapperFactory {
         PoolId indexed poolId,
         address oracle,
         address unitOfAccount,
-        PoolKey poolKey
+        PoolKey poolKey // poolKey.fee: {bps} pool fee tier
     );
 
     constructor(address _evc, address _positionManager, address _weth) BaseUniswapWrapperFactory(_evc) {
@@ -73,6 +73,7 @@ contract UniswapV4WrapperFactory is BaseUniswapWrapperFactory {
     function isUniswapV4WrapperValid(UniswapV4Wrapper uniswapV4WrapperToCheck) external view returns (bool) {
         (Currency currency0, Currency currency1, uint24 fee, int24 tickSpacing, IHooks hooks) =
             uniswapV4WrapperToCheck.poolKey();
+        // fee: {bps} pool fee tier propagated from poolKey; tickSpacing: dimensionless tick interval
         PoolKey memory poolKey =
             PoolKey({currency0: currency0, currency1: currency1, fee: fee, tickSpacing: tickSpacing, hooks: hooks});
 

@@ -37,11 +37,16 @@ contract UniswapMintPositionHelper is EVCUtil {
         shares = vault.deposit(assets, receiver);
     }
 
+    /// @return tokenId   NFT token ID of the minted position
+    /// @return liquidity {liq} liquidity minted into the position
+    /// @return amount0   {tok0} token0 actually consumed
+    /// @return amount1   {tok1} token1 actually consumed
     function mintPosition(INonfungiblePositionManager.MintParams memory params)
         external
         payable
         returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
     {
+        // params.amount0Desired: {tok0}, params.amount1Desired: {tok1}
         if (params.amount0Desired != 0) {
             IERC20(params.token0).safeTransferFrom(_msgSender(), address(this), params.amount0Desired);
         }
@@ -49,16 +54,17 @@ contract UniswapMintPositionHelper is EVCUtil {
             IERC20(params.token1).safeTransferFrom(_msgSender(), address(this), params.amount1Desired);
         }
 
-        params.amount0Desired = IERC20(params.token0).balanceOf(address(this));
-        params.amount1Desired = IERC20(params.token1).balanceOf(address(this));
+        params.amount0Desired = IERC20(params.token0).balanceOf(address(this)); // {tok0}
+        params.amount1Desired = IERC20(params.token1).balanceOf(address(this)); // {tok1}
 
         IERC20(params.token0).forceApprove(address(nonfungiblePositionManager), params.amount0Desired);
         IERC20(params.token1).forceApprove(address(nonfungiblePositionManager), params.amount1Desired);
 
         (tokenId, liquidity, amount0, amount1) = (nonfungiblePositionManager.mint{value: msg.value}(params));
+        // tokenId: dimensionless NFT ID, liquidity: {liq}, amount0: {tok0} consumed, amount1: {tok1} consumed
 
-        uint256 leftoverToken0Balance = IERC20(params.token0).balanceOf(address(this));
-        uint256 leftoverToken1Balance = IERC20(params.token1).balanceOf(address(this));
+        uint256 leftoverToken0Balance = IERC20(params.token0).balanceOf(address(this)); // {tok0}
+        uint256 leftoverToken1Balance = IERC20(params.token1).balanceOf(address(this)); // {tok1}
 
         if (leftoverToken0Balance > 0) {
             IERC20(params.token0).safeTransfer(_msgSender(), leftoverToken0Balance);
@@ -69,6 +75,12 @@ contract UniswapMintPositionHelper is EVCUtil {
         return (tokenId, liquidity, amount0, amount1);
     }
 
+    /// @param tickLower  {tick} lower tick bound for the position
+    /// @param tickUpper  {tick} upper tick bound for the position
+    /// @param liquidity  {liq}  desired liquidity to mint
+    /// @param amount0Max {tok0} maximum token0 (or ETH if currency0 is native) the caller is willing to spend
+    /// @param amount1Max {tok1} maximum token1 the caller is willing to spend
+    /// @return tokenId   NFT token ID of the minted V4 position
     function mintPosition(
         PoolKey calldata poolKey,
         int24 tickLower,
@@ -79,7 +91,7 @@ contract UniswapMintPositionHelper is EVCUtil {
         address owner,
         bytes calldata hookData
     ) external payable returns (uint256 tokenId) {
-        tokenId = positionManager.nextTokenId();
+        tokenId = positionManager.nextTokenId(); // dimensionless NFT token ID of the next position to be minted
 
         if (amount0Max != 0) {
             if (!poolKey.currency0.isAddressZero()) {
@@ -93,13 +105,13 @@ contract UniswapMintPositionHelper is EVCUtil {
             IERC20(Currency.unwrap(poolKey.currency1)).safeTransferFrom(_msgSender(), address(this), amount1Max);
         }
 
-        uint256 currentWETHBalance = weth.balanceOf(address(this));
+        uint256 currentWETHBalance = weth.balanceOf(address(this)); // {tok0} in WETH units (same decimals as currency0)
         if (currentWETHBalance > 0) {
             weth.withdraw(currentWETHBalance); //unwrap WETH to ETH if any is available
         }
 
-        amount0Max = SafeCast.toUint128(poolKey.currency0.balanceOf(address(this)));
-        amount1Max = SafeCast.toUint128(poolKey.currency1.balanceOf(address(this)));
+        amount0Max = SafeCast.toUint128(poolKey.currency0.balanceOf(address(this))); // {tok0} full balance of currency0 available
+        amount1Max = SafeCast.toUint128(poolKey.currency1.balanceOf(address(this))); // {tok1} full balance of currency1 available
 
         if (!poolKey.currency0.isAddressZero()) {
             poolKey.currency0.transfer(address(positionManager), amount0Max);
@@ -121,7 +133,7 @@ contract UniswapMintPositionHelper is EVCUtil {
         params[3] = abi.encode(poolKey.currency0, _msgSender()); //if there is remaining amount of currency0, it will be swept to the user
         params[4] = abi.encode(poolKey.currency1, _msgSender());
 
-        positionManager.modifyLiquidities{value: address(this).balance}(abi.encode(actions, params), block.timestamp);
+        positionManager.modifyLiquidities{value: address(this).balance}(abi.encode(actions, params), block.timestamp); // block.timestamp: {s} deadline (immediate execution)
     }
 
     receive() external payable {}

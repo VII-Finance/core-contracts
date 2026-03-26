@@ -29,8 +29,8 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
     PoolId public immutable poolId;
     IPoolManager public immutable poolManager;
-    uint256 public immutable unit0;
-    uint256 public immutable unit1;
+    uint256 public immutable unit0; // {unit} = 10**decimals0; one canonical unit of currency0
+    uint256 public immutable unit1; // {unit} = 10**decimals1; one canonical unit of currency1
 
     Currency public immutable currency0;
     Currency public immutable currency1;
@@ -47,16 +47,16 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
     ///      This state is maintained to accurately account for and distribute fees to each partial owner when they interact with their position.
     ///      For this reason, this contract is expected to hold some currency0 and currency1 tokens till all of the tokenId holders have unwrapped.
     struct TokensOwed {
-        uint256 fees0Owed;
-        uint256 fees1Owed;
+        uint256 fees0Owed; // {tok0} cumulative token0 fees held by this contract on behalf of remaining tokenId holders
+        uint256 fees1Owed; // {tok1} cumulative token1 fees held by this contract on behalf of remaining tokenId holders
     }
 
     struct PositionState {
         PositionInfo position;
-        uint128 liquidity;
-        uint256 feeGrowthInside0LastX128;
-        uint256 feeGrowthInside1LastX128;
-        uint160 sqrtRatioX96;
+        uint128 liquidity; // {liq} position liquidity
+        uint256 feeGrowthInside0LastX128; // QX128{tok0/liq} last-recorded fee growth inside range for token0
+        uint256 feeGrowthInside1LastX128; // QX128{tok1/liq} last-recorded fee growth inside range for token1
+        uint160 sqrtRatioX96; // QX96{sqrt(tok1/tok0)} sqrt price at time of state snapshot
     }
 
     error InvalidPoolId(PoolId actualPoolId, PoolId expectedPoolId);
@@ -100,8 +100,8 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
     /// @notice Unwraps a position by removing proportional liquidity and send the resulting tokens and proportional fees to the recipient
     /// @param to The recipient address
     /// @param tokenId The position token ID
-    /// @param totalSupplyOfTokenId The total supply of the token ID
-    /// @param amount The proportion of the position to unwrap
+    /// @param totalSupplyOfTokenId {share} D36 total ERC6909 supply for tokenId
+    /// @param amount {share} D36 ERC6909 share amount being unwrapped
     /// @param extraData Additional parameters for the unwrap operation (uint128 amount0Min, uint128 amount1Min, uint256 deadline encoded)
     function _unwrap(
         address to,
@@ -110,36 +110,41 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         uint256 amount,
         bytes calldata extraData
     ) internal override {
-        uint256 amount0;
-        uint256 amount1;
+        uint256 amount0; // {tok0} principal token0 corresponding to liquidityToRemove
+        uint256 amount1; // {tok1} principal token1 corresponding to liquidityToRemove
 
         TokensOwed memory feesOwed = tokensOwed[tokenId];
 
         {
             // Here we are using the pool's spot price to calculate how much the liquidity is worth in underlying tokens
-            (uint160 sqrtRatioX96,,,) = poolManager.getSlot0(poolId);
+            (uint160 sqrtRatioX96,,,) = poolManager.getSlot0(poolId); // QX96{sqrt(tok1/tok0)}
             PositionState memory positionState = _getPositionState(tokenId, sqrtRatioX96);
-            uint128 liquidityToRemove =
+            // {liq} = {liq} * {share} / {share}
+            uint128 liquidityToRemove = // {liq} proportional liquidity to remove for this unwrap amount
                 proportionalShare(positionState.liquidity, amount, totalSupplyOfTokenId).toUint128();
             (amount0, amount1) = _principal(positionState, liquidityToRemove);
 
             (uint256 amount0Received, uint256 amount1Received) =
                 _decreaseLiquidity(tokenId, liquidityToRemove, ActionConstants.MSG_SENDER, extraData);
+            // amount0Received: {tok0}, amount1Received: {tok1}
 
-            feesOwed.fees0Owed += amount0Received - amount0;
-            feesOwed.fees1Owed += amount1Received - amount1;
+            // excess over principal = fees collected; accumulate for remaining holders
+            feesOwed.fees0Owed += amount0Received - amount0; // {tok0}
+            feesOwed.fees1Owed += amount1Received - amount1; // {tok1}
         }
 
+        // {tok0} = {tok0} * {share} / {share}
         uint256 fees0ToSend = proportionalShare(feesOwed.fees0Owed, amount, totalSupplyOfTokenId);
+        // {tok1} = {tok1} * {share} / {share}
         uint256 fees1ToSend = proportionalShare(feesOwed.fees1Owed, amount, totalSupplyOfTokenId);
 
-        feesOwed.fees0Owed -= fees0ToSend;
-        feesOwed.fees1Owed -= fees1ToSend;
+        feesOwed.fees0Owed -= fees0ToSend; // {tok0} remainder stays for other holders
+        feesOwed.fees1Owed -= fees1ToSend; // {tok1} remainder stays for other holders
 
         tokensOwed[tokenId] = feesOwed;
 
-        uint256 currency1AmountToTransfer = amount1 + fees1ToSend;
-        uint256 currency0AmountToTransfer = amount0 + fees0ToSend;
+        uint256 currency1AmountToTransfer = amount1 + fees1ToSend; // {tok1}
+        uint256 currency0AmountToTransfer = amount0 + fees0ToSend; // {tok0}
 
         if (currency1AmountToTransfer > 0) currency1.transfer(to, amount1 + fees1ToSend);
         // currency0 can be native ETH, where we know for sure that reentrancy is possible.
@@ -148,8 +153,8 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
     }
 
     function _settleFullUnwrap(uint256 tokenId, address to) internal override {
-        uint256 fees0ToSend = tokensOwed[tokenId].fees0Owed;
-        uint256 fees1ToSend = tokensOwed[tokenId].fees1Owed;
+        uint256 fees0ToSend = tokensOwed[tokenId].fees0Owed; // {tok0}
+        uint256 fees1ToSend = tokensOwed[tokenId].fees1Owed; // {tok1}
         delete tokensOwed[tokenId];
         if (fees1ToSend > 0) currency1.transfer(to, fees1ToSend);
 
@@ -162,20 +167,25 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
     /// @dev This calculation disregards the current pool spot price and instead uses the oracle price
     ///      to determine how much the liquidity position is worth
     /// @param tokenId The ID of the position token to evaluate
-    /// @param amount The proportion of the position to value
-    /// @return the proportional value of the specified position in unit of account
+    /// @param amount {share} D36 ERC6909 share balance being valued
+    /// @return {UoA} proportional value of the specified position in unit-of-account terms
     function calculateValueOfTokenId(uint256 tokenId, uint256 amount) public view override returns (uint256) {
         uint160 sqrtRatioX96 =
-            getSqrtRatioX96(_getCurrencyAddress(currency0), _getCurrencyAddress(currency1), unit0, unit1);
+            getSqrtRatioX96(_getCurrencyAddress(currency0), _getCurrencyAddress(currency1), unit0, unit1); // QX96{sqrt(tok1/tok0)}
 
         (uint256 amount0, uint256 amount1) = previewUnwrap(tokenId, sqrtRatioX96, amount);
+        // amount0: {tok0}, amount1: {tok1}
 
-        uint256 amount0InUnitOfAccount = getQuote(amount0, _getCurrencyAddress(currency0));
-        uint256 amount1InUnitOfAccount = getQuote(amount1, _getCurrencyAddress(currency1));
+        uint256 amount0InUnitOfAccount = getQuote(amount0, _getCurrencyAddress(currency0)); // {UoA}
+        uint256 amount1InUnitOfAccount = getQuote(amount1, _getCurrencyAddress(currency1)); // {UoA}
 
-        return amount0InUnitOfAccount + amount1InUnitOfAccount;
+        return amount0InUnitOfAccount + amount1InUnitOfAccount; // {UoA}
     }
 
+    /// @param sqrtRatioX96  QX96{sqrt(tok1/tok0)} oracle-derived sqrt price for valuation
+    /// @param unwrapAmount  {share} D36 share amount being previewed
+    /// @return amount0      {tok0} estimated token0 to be received (principal + proportional fees)
+    /// @return amount1      {tok1} estimated token1 to be received (principal + proportional fees)
     function previewUnwrap(uint256 tokenId, uint160 sqrtRatioX96, uint256 unwrapAmount)
         public
         view
@@ -183,15 +193,20 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
     {
         PositionState memory positionState = _getPositionState(tokenId, sqrtRatioX96);
 
-        uint256 totalSupplyOfTokenId = totalSupply(tokenId);
+        uint256 totalSupplyOfTokenId = totalSupply(tokenId); // {share} D36
 
-        uint128 liquidityToRemove =
+        // {liq} = {liq} * {share} / {share}
+        uint128 liquidityToRemove = // {liq} proportional liquidity corresponding to unwrapAmount shares
             proportionalShare(positionState.liquidity, unwrapAmount, totalSupplyOfTokenId).toUint128();
         (amount0, amount1) = _principal(positionState, liquidityToRemove);
+        // amount0: {tok0}, amount1: {tok1}
 
         (uint256 pendingFees0, uint256 pendingFees1) = _pendingFees(positionState);
+        // pendingFees0: {tok0}, pendingFees1: {tok1}
 
+        // {tok0} += ({tok0} + {tok0}) * {share} / {share}
         amount0 += proportionalShare(pendingFees0 + tokensOwed[tokenId].fees0Owed, unwrapAmount, totalSupplyOfTokenId);
+        // {tok1} += ({tok1} + {tok1}) * {share} / {share}
         amount1 += proportionalShare(pendingFees1 + tokensOwed[tokenId].fees1Owed, unwrapAmount, totalSupplyOfTokenId);
     }
 
@@ -207,7 +222,7 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
     /// @notice Gets the current state of a position
     /// @param tokenId The position token ID
-    /// @param sqrtRatioX96 The sqrt price ratio to use for calculations
+    /// @param sqrtRatioX96 QX96{sqrt(tok1/tok0)} the sqrt price ratio to use for calculations
     /// @return positionState The complete position state
     function _getPositionState(uint256 tokenId, uint160 sqrtRatioX96)
         internal
@@ -218,6 +233,9 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         (uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128) = poolManager.getPositionInfo(
             poolId, address(underlying), position.tickLower(), position.tickUpper(), bytes32(tokenId)
         );
+        // liquidity: {liq} position liquidity from pool
+        // feeGrowthInside0LastX128: QX128{tok0/liq} last-recorded fee growth inside range for token0
+        // feeGrowthInside1LastX128: QX128{tok1/liq} last-recorded fee growth inside range for token1
 
         positionState = PositionState({
             position: position,
@@ -232,8 +250,8 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
     /// @dev For pools with the yield harvesting hook, this will under-calculate the pending fees because it does not account for interest fees that are pending and yet to be harvested.
     /// @dev We expect this miscalculation to be minimal, as a healthy swap frequency should ensure that the amount of unharvested pending interest remains low.
     /// @param positionState The position state
-    /// @return feesOwed0 Pending fees for token0
-    /// @return feesOwed1 Pending fees for token1
+    /// @return feesOwed0 {tok0} pending fees for token0 not yet reflected in tokensOwed
+    /// @return feesOwed1 {tok1} pending fees for token1 not yet reflected in tokensOwed
     function _pendingFees(PositionState memory positionState)
         internal
         view
@@ -242,6 +260,7 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128) = poolManager.getFeeGrowthInside(
             poolId, positionState.position.tickLower(), positionState.position.tickUpper()
         );
+        // feeGrowthInside0X128: QX128{tok0/liq}, feeGrowthInside1X128: QX128{tok1/liq}
         (feesOwed0, feesOwed1) = UniswapPositionValueHelper.feesOwed(
             feeGrowthInside0X128,
             feeGrowthInside1X128,
@@ -252,6 +271,9 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
     }
 
     /// @notice Calculates principal amounts for a specific liquidity amount
+    /// @param liquidity        {liq} liquidity to convert to token amounts
+    /// @return principalAmount0 {tok0} token0 principal
+    /// @return principalAmount1 {tok1} token1 principal
     function _principal(PositionState memory positionState, uint128 liquidity)
         internal
         pure
@@ -265,18 +287,22 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
         );
     }
 
+    /// @param liquidity      {liq} proportional liquidity to remove
+    /// @return amount0Received {tok0} token0 actually received (principal + fees)
+    /// @return amount1Received {tok1} token1 actually received (principal + fees)
     function _decreaseLiquidity(uint256 tokenId, uint128 liquidity, address recipient, bytes calldata extraData)
         internal
         returns (uint256 amount0Received, uint256 amount1Received)
     {
-        uint256 currency0BalanceBefore = currency0.balanceOfSelf();
-        uint256 currency1BalanceBefore = currency1.balanceOfSelf();
+        uint256 currency0BalanceBefore = currency0.balanceOfSelf(); // {tok0}
+        uint256 currency1BalanceBefore = currency1.balanceOfSelf(); // {tok1}
 
         bytes memory actions = new bytes(2);
         actions[0] = bytes1(uint8(Actions.DECREASE_LIQUIDITY));
         actions[1] = bytes1(uint8(Actions.TAKE_PAIR));
 
         (uint128 amount0Min, uint128 amount1Min, uint256 deadline) = _decodeExtraData(extraData);
+        // amount0Min: {tok0}, amount1Min: {tok1}, deadline: {s}
 
         bytes[] memory params = new bytes[](2);
         params[0] = abi.encode(tokenId, liquidity, amount0Min, amount1Min, bytes(""));
@@ -284,10 +310,13 @@ contract UniswapV4Wrapper is ERC721WrapperBase {
 
         IPositionManager(address(underlying)).modifyLiquidities(abi.encode(actions, params), deadline);
 
-        amount0Received = currency0.balanceOfSelf() - currency0BalanceBefore;
-        amount1Received = currency1.balanceOfSelf() - currency1BalanceBefore;
+        amount0Received = currency0.balanceOfSelf() - currency0BalanceBefore; // {tok0}
+        amount1Received = currency1.balanceOfSelf() - currency1BalanceBefore; // {tok1}
     }
 
+    /// @return amount0Min {tok0} minimum token0 to receive (slippage protection)
+    /// @return amount1Min {tok1} minimum token1 to receive (slippage protection)
+    /// @return deadline   {s} Unix timestamp after which the transaction reverts
     function _decodeExtraData(bytes calldata extraData)
         internal
         view

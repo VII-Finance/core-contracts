@@ -10,13 +10,16 @@ import {IPriceOracle} from "lib/euler-price-oracle/src/interfaces/IPriceOracle.s
 import {INonfungiblePositionManager} from "lib/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
 import {FixedRateOracle} from "lib/euler-price-oracle/src/adapter/fixed/FixedRateOracle.sol";
 import {IEulerRouter} from "lib/euler-interfaces/interfaces/IEulerRouter.sol";
-import {Test} from "forge-std/Test.sol";
+import {Test, console} from "forge-std/Test.sol";
 import {IERC20Metadata} from "lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import {ERC721WrapperBase} from "src/ERC721WrapperBase.sol";
 import {Fuzzers} from "@uniswap/v4-core/src/test/Fuzzers.sol";
 import {Pool} from "@uniswap/v4-core/src/libraries/Pool.sol";
 import {UniswapMintPositionHelper} from "src/uniswap/periphery/UniswapMintPositionHelper.sol";
 import {Addresses} from "test/helpers/Addresses.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
+import {FixedPoint96} from "lib/v3-core/contracts/libraries/FixedPoint96.sol";
+import {IMockUniswapWrapper} from "test/helpers/IMockUniswapWrapper.sol";
 
 contract UniswapBaseTest is Test, Fuzzers {
     uint256 constant INTERNAL_DEBT_PRECISION_SHIFT = 31;
@@ -241,5 +244,43 @@ contract UniswapBaseTest is Test, Fuzzers {
         assertEq(wrapper.balanceOf(borrower), 0);
         //liquidator must have gotten all of the shares
         assertEq(wrapper.balanceOf(liquidator, tokenId), wrapper.FULL_AMOUNT());
+    }
+
+    // returns how much 1 wei of token0 is worth in token1 decimals
+    function sqrtPriceX96ToPrice18Adjusted(uint160 sqrtPriceX96, uint256 token0Decimals)
+        internal
+        pure
+        returns (uint256 priceInQuoteDecimals)
+    {
+        // price = (sqrtPriceX96^2 * 1e18) / 2^192
+        // priceIn18 = FullMath.mulDiv(uint256(sqrtPriceX96) * uint256(sqrtPriceX96), 10 ** token0Decimals, 1 << 192);
+        uint256 amount0 = FullMath.mulDiv(1e18, FixedPoint96.Q96, sqrtPriceX96);
+        uint256 amount1 = FullMath.mulDiv(1e18, sqrtPriceX96, FixedPoint96.Q96);
+
+        return (amount1 * 10 ** token0Decimals) / amount0;
+    }
+
+    function sqrtPriceTest(uint256 priceInQuoteDecimals, address baseToken, address quoteToken) internal view {
+        uint256 baseTokenDecimals = IERC20Metadata(baseToken).decimals();
+        uint256 quoteTokenDecimals = IERC20Metadata(quoteToken).decimals();
+
+        uint256 unitBaseToken = 10 ** baseTokenDecimals;
+        uint256 unitQuoteToken = 10 ** quoteTokenDecimals;
+
+        uint160 sqrtPriceFromOracle = IMockUniswapWrapper(address(wrapper))
+            .getSqrtRatioX96FromOracle(baseToken, quoteToken, unitBaseToken, unitQuoteToken);
+
+        uint256 computedPriceInQuoteDecimals = sqrtPriceX96ToPrice18Adjusted(sqrtPriceFromOracle, baseTokenDecimals);
+        assertEq(priceInQuoteDecimals, computedPriceInQuoteDecimals);
+
+        uint160 sqrtReversePriceFromOracle = IMockUniswapWrapper(address(wrapper))
+            .getSqrtRatioX96FromOracle(quoteToken, baseToken, unitQuoteToken, unitBaseToken);
+
+        uint256 computedReversePriceInBaseDecimals =
+            sqrtPriceX96ToPrice18Adjusted(sqrtReversePriceFromOracle, quoteTokenDecimals);
+
+        uint256 expectedPriceInBaseDecimals = 10 ** (baseTokenDecimals + quoteTokenDecimals) / priceInQuoteDecimals;
+
+        assertApproxEqAbs(computedReversePriceInBaseDecimals, expectedPriceInBaseDecimals, unitQuoteToken);
     }
 }

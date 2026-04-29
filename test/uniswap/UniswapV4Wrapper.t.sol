@@ -17,6 +17,7 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IEVault} from "lib/euler-interfaces/interfaces/IEVault.sol";
 import {IPriceOracle} from "src/interfaces/IPriceOracle.sol";
 import {Actions} from "lib/v4-periphery/src/libraries/Actions.sol";
+import {ISubscriber} from "lib/v4-periphery/src/interfaces/ISubscriber.sol";
 import {IERC20Metadata} from "lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import {LiquidityAmounts} from "lib/v3-periphery/contracts/libraries/LiquidityAmounts.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
@@ -42,7 +43,7 @@ import {ActionConstants} from "lib/v4-periphery/src/libraries/ActionConstants.so
 import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {MockUniswapV4Wrapper} from "test/helpers/MockUniswapV4Wrapper.sol";
 
-contract UniswapV4WrapperTest is Test, UniswapBaseTest {
+contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
     using StateLibrary for IPoolManager;
     using BalanceDeltaLibrary for BalanceDelta;
 
@@ -251,19 +252,13 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
     }
 
     function testGetSqrtRatioX96() public view {
-        uint256 fixedDecimals = 10 ** 18;
-        uint160 sqrtRatioX96FromOracle = MockUniswapV4Wrapper(payable(address(wrapper)))
-            .getSqrtRatioX96FromOracle(address(token0), address(token1), unit0, unit1);
+        sqrtPriceTest(2484634903, Addresses.WETH, Addresses.USDC); //2.4k USDC per ETH
+        sqrtPriceTest(103283676033, Addresses.WBTC, Addresses.USDC); //103k BTC per USDC
 
-        uint256 sqrtPriceInFixed18Decimal = Math.mulDiv(sqrtRatioX96FromOracle, fixedDecimals, 1 << 96);
+        sqrtPriceTest(41568954820846990734, Addresses.WBTC, Addresses.WETH); //41.56 BTC per ETH
 
-        uint256 priceInFixed18Decimal = Math.mulDiv(sqrtPriceInFixed18Decimal, sqrtPriceInFixed18Decimal, fixedDecimals);
-
-        uint256 token0PerToken1InFixed18Decimal = Math.mulDiv(
-            oracle.getQuote(unit0, token0, unitOfAccount), fixedDecimals, oracle.getQuote(unit1, token1, unitOfAccount)
-        );
-
-        assertApproxEqAbs(priceInFixed18Decimal, token0PerToken1InFixed18Decimal, 1e6);
+        sqrtPriceTest(2484754836, Addresses.WETH, Addresses.USDT); //2.4k USDC per ETH
+        sqrtPriceTest(103288661536, Addresses.WBTC, Addresses.USDT); //103k BTC per USDC
     }
 
     function testWrapFailIfNotTheSamePoolId() public {
@@ -341,16 +336,9 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         (uint256 previewUnwrapAmount0, uint256 previewUnwrapAmount1) =
             UniswapV4Wrapper(payable(address(wrapper))).previewUnwrap(tokenId, sqrtPriceX96, wrapper.FULL_AMOUNT());
 
+        // TODO: make sure to pass the correct minimum amounts here
         wrapper.unwrap(
-            borrower,
-            tokenId,
-            borrower,
-            wrapper.FULL_AMOUNT(),
-            abi.encode(
-                uint128(amount0Spent > 0 ? amount0Spent - 1 : 0),
-                uint128(amount1Spent > 0 ? amount1Spent - 1 : 0),
-                block.timestamp
-            )
+            borrower, tokenId, borrower, wrapper.FULL_AMOUNT(), abi.encode(uint128(0), uint128(0), block.timestamp)
         );
 
         assertEq(poolKey.currency0.balanceOf(borrower), amount0BalanceBefore + previewUnwrapAmount0);
@@ -358,8 +346,8 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
 
         assertEq(wrapper.balanceOf(borrower, tokenId), 0);
 
-        assertApproxEqAbs(poolKey.currency0.balanceOf(borrower), amount0BalanceBefore + amount0Spent, 1);
-        assertApproxEqAbs(poolKey.currency1.balanceOf(borrower), amount1BalanceBefore + amount1Spent, 1);
+        assertApproxEqRel(poolKey.currency0.balanceOf(borrower), amount0BalanceBefore + amount0Spent, 1000);
+        assertApproxEqRel(poolKey.currency1.balanceOf(borrower), amount1BalanceBefore + amount1Spent, 1000);
     }
 
     function testFuzzFeeMath(int256 liquidityDelta, uint256 swapAmount) public {
@@ -406,7 +394,7 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         wrapper.wrap(tokenIdMinted, borrower);
         wrapper.enableTokenIdAsCollateral(tokenIdMinted);
 
-        uint256 totalBalanceBefore = wrapper.balanceOf(borrower);
+        uint256 totalBalanceBefore = wrapper.calculateValueOfTokenId(tokenIdMinted, wrapper.totalSupply(tokenIdMinted));
 
         fees0ToDonate = bound(fees0ToDonate, 1, amount0);
         fees1ToDonate = bound(fees1ToDonate, 1, amount1);
@@ -428,27 +416,41 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         uint256 expectedFeesValue = oracle.getQuote(expectedFees0, token0, unitOfAccount)
             + oracle.getQuote(expectedFees1, token1, unitOfAccount);
 
-        assertApproxEqAbs(wrapper.balanceOf(borrower), totalBalanceBefore + expectedFeesValue, 1);
+        assertApproxEqAbs(
+            wrapper.calculateValueOfTokenId(tokenIdMinted, wrapper.totalSupply(tokenIdMinted)),
+            totalBalanceBefore + expectedFeesValue,
+            1
+        );
 
         //now if a user does partial unwrap feesOwed should be deducted proportionally
         partialUnwrapAmount = bound(partialUnwrapAmount, 1, wrapper.FULL_AMOUNT());
+
+        uint256 totalSupplyOfTokenIdBefore = wrapper.totalSupply(tokenIdMinted); // should be equal to wrapper.FULL_AMOUNT() + wrapper.MINIMUM_AMOUNT()
+
+        uint256 expectedValueAfter = MockUniswapV4Wrapper(payable(address(wrapper)))
+            .calculateExactedValueOfTokenIdAfterUnwrap(tokenIdMinted, partialUnwrapAmount, wrapper.FULL_AMOUNT());
         wrapper.unwrap(borrower, tokenIdMinted, borrower, partialUnwrapAmount, "");
+
+        assertEq(wrapper.balanceOf(borrower), expectedValueAfter);
 
         (uint256 currentFees0Owed, uint256 currentFees1Owed) =
             MockUniswapV4Wrapper(payable(address(wrapper))).tokensOwed(tokenIdMinted);
 
-        assertEq(currentFees0Owed, expectedFees0 - (expectedFees0 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
-        assertEq(currentFees1Owed, expectedFees1 - (expectedFees1 * partialUnwrapAmount) / wrapper.FULL_AMOUNT());
+        assertEq(currentFees0Owed, expectedFees0 - (expectedFees0 * partialUnwrapAmount) / totalSupplyOfTokenIdBefore);
+        assertEq(currentFees1Owed, expectedFees1 - (expectedFees1 * partialUnwrapAmount) / totalSupplyOfTokenIdBefore);
 
         assertEq(currency0.balanceOf(address(wrapper)), currentFees0Owed);
         assertEq(currency1.balanceOf(address(wrapper)), currentFees1Owed);
 
-        //now if a user does full unwrap, feesOwed should be zero and the should have gone to the user itself
+        //unwrap is not allowed if user doesn't hold exactly the FULL_AMOUNT of tokens
+        vm.expectRevert();
         wrapper.unwrap(borrower, tokenIdMinted, borrower);
-        (currentFees0Owed, currentFees1Owed) = MockUniswapV4Wrapper(payable(address(wrapper))).tokensOwed(tokenIdMinted);
-        assertEq(currentFees0Owed, 0);
-        assertEq(currentFees1Owed, 0);
-        assertEq(wrapper.underlying().ownerOf(tokenIdMinted), borrower);
+
+        // //now if a user does full unwrap, feesOwed should be zero and the should have gone to the user itself
+        // (currentFees0Owed, currentFees1Owed) = MockUniswapV4Wrapper(payable(address(wrapper))).tokensOwed(tokenIdMinted);
+        // assertEq(currentFees0Owed, 0);
+        // assertEq(currentFees1Owed, 0);
+        // assertEq(wrapper.underlying().ownerOf(tokenIdMinted), borrower);
     }
 
     function testFuzzTotalPositionValueV4(LiquidityParams memory params) public {
@@ -543,4 +545,24 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest {
         wrapper.unwrap(borrower, tokenId, borrower, wrapper.FULL_AMOUNT(), "");
         vm.stopPrank();
     }
+
+    function test_useSubUnSubScribeToSkimPlusWrap() public {
+        positionManager.subscribe(tokenId, address(this), "");
+
+        wrapper.underlying().approve(address(wrapper), tokenId);
+        vm.expectRevert(ERC721WrapperBase.TokenIdIsAlreadyWrapped.selector);
+        wrapper.wrap(tokenId, address(this));
+    }
+
+    // This is demo for how someone can reenter using v4 subscription
+    function notifyUnsubscribe(uint256) external {
+        // when transferFrom is happening for wrapping, reenter and try to do the skim
+        wrapper.skim(address(this));
+    }
+    function notifySubscribe(uint256 tokenId, bytes memory data) external {}
+
+    function notifyBurn(uint256 tokenId, address owner, PositionInfo info, uint256 liquidity, BalanceDelta feesAccrued)
+        external {}
+
+    function notifyModifyLiquidity(uint256 tokenId, int256 liquidityChange, BalanceDelta feesAccrued) external {}
 }

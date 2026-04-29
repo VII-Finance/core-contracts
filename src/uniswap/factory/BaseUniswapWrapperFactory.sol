@@ -31,7 +31,7 @@ abstract contract BaseUniswapWrapperFactory {
         view
         returns (bytes memory)
     {
-        uint256 unit = 10 ** _getDecimals(unitOfAccount);
+        uint256 unit = 10 ** _getDecimals(unitOfAccount); // {unit} = 10**decimals of unitOfAccount; 1:1 oracle scale factor
         bytes memory bytecode = type(FixedRateOracle).creationCode;
         return abi.encodePacked(bytecode, abi.encode(uniswapWrapper, unitOfAccount, unit));
     }
@@ -53,7 +53,7 @@ abstract contract BaseUniswapWrapperFactory {
     }
 
     function _createFixedRateOracle(address uniswapWrapper, address unitOfAccount) internal returns (address) {
-        uint256 unit = 10 ** _getDecimals(unitOfAccount);
+        uint256 unit = 10 ** _getDecimals(unitOfAccount); // {unit} = 10**decimals of unitOfAccount; 1:1 oracle scale factor
         bytes32 fixedRateOracleSalt = _getFixedRateOracleSalt(uniswapWrapper, unitOfAccount);
         return address(new FixedRateOracle{salt: fixedRateOracleSalt}(uniswapWrapper, unitOfAccount, unit));
     }

@@ -60,11 +60,11 @@ contract UniswapWrapperFactoryDeploymentScript is Script {
         uint256 v4Salt = findVanitySalt(
             CREATE2_FACTORY, type(UniswapV4WrapperFactory).creationCode, abi.encode(evc, v4PositionManager, weth)
         );
-        v4Salt = 76508893199692067667885840213832328288724823780803052223500390527924915937700;
+        v4Salt = 66764918777083867356439198702768048070563948988428929879719948227598378547301;
 
         vm.startBroadcast();
 
-        new UniswapV3WrapperFactory{salt: bytes32(v3Salt)}(evc, nonFungiblePositionManager);
+        // new UniswapV3WrapperFactory{salt: bytes32(v3Salt)}(evc, nonFungiblePositionManager);
 
         new UniswapV4WrapperFactory{salt: bytes32(v4Salt)}(evc, v4PositionManager, weth);
 

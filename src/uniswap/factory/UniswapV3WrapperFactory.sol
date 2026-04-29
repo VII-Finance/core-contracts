@@ -6,6 +6,7 @@ import {BaseUniswapWrapperFactory} from "src/uniswap/factory/BaseUniswapWrapperF
 
 /// @title Factory for creating Uniswap V3 wrappers
 /// @author VII Finance
+/// @notice For now, we won't support Uniswap V3 because it requires non trivial work to fix the bug found in the last audit
 contract UniswapV3WrapperFactory is BaseUniswapWrapperFactory {
     address public immutable nonFungiblePositionManager;
 

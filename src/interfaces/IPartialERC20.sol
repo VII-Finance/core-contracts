@@ -10,6 +10,8 @@ pragma solidity ^0.8.0;
  *      this interface will be implemented, but with different internal logic than simple reading of balances and transferring tokens.
  */
 interface IPartialERC20 {
+    /// @return {UoA} total position value for `owner` in unit-of-account terms (as implemented by ERC721WrapperBase)
     function balanceOf(address owner) external view returns (uint256);
+    /// @param amount {UoA} vault-level share amount; internally redistributed as proportional ERC6909 tokens
     function transfer(address to, uint256 amount) external returns (bool);
 }

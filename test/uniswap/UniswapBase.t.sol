@@ -57,7 +57,7 @@ contract UniswapBaseTest is Test, Fuzzers {
 
     function setUp() public virtual {
         string memory fork_url = vm.envString("MAINNET_RPC_URL");
-        vm.createSelectFork(fork_url, 22473612);
+        vm.createSelectFork(fork_url, 24991233);
 
         evc = IEVC(Addresses.EVC);
         eVault = IEVault(Addresses.EULER_USDC_VAULT); //euler prime USDC

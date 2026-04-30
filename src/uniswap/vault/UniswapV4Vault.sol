@@ -17,6 +17,7 @@ import {ActionConstants} from "lib/v4-periphery/src/libraries/ActionConstants.so
 import {IWETH9} from "lib/v4-periphery/src/interfaces/external/IWETH9.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PositionInfo} from "lib/v4-periphery/src/libraries/PositionInfoLibrary.sol";
+import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 
 contract UniswapV4Vault is BaseVault {
     using StateLibrary for IPoolManager;
@@ -26,21 +27,19 @@ contract UniswapV4Vault is BaseVault {
     PoolId public immutable poolId;
     PoolKey public poolKey;
 
-    using StateLibrary for IPoolManager;
-
-    constructor(IERC721WrapperBase _wrapper, IERC20 _asset, IEVault _borrowVault)
-        BaseVault(_wrapper, _asset, _borrowVault)
+    constructor(IERC721WrapperBase _wrapper, IERC20 _asset, IEVault _borrowVault, uint256 _targetLeverage)
+        BaseVault(_wrapper, _asset, _borrowVault, _targetLeverage)
     {
         UniswapV4Wrapper v4Wrapper = UniswapV4Wrapper(payable(address(_wrapper)));
         weth = v4Wrapper.weth();
         poolManager = v4Wrapper.poolManager();
-        (Currency currency0, Currency currency1, uint24 fee, int24 tickSpacing, IHooks hooks) = v4Wrapper.poolKey();
+        (Currency currency0, Currency currency1, uint24 fee, int24 _tickSpacing, IHooks hooks) = v4Wrapper.poolKey();
         poolKey =
-            PoolKey({currency0: currency0, currency1: currency1, fee: fee, tickSpacing: tickSpacing, hooks: hooks});
+            PoolKey({currency0: currency0, currency1: currency1, fee: fee, tickSpacing: _tickSpacing, hooks: hooks});
         poolId = poolKey.toId();
+        tickSpacing = _tickSpacing;
     }
 
-    //this gets called in the constructor of BaseVault so it shouldn't be using immutables
     function _getTokens(address _wrapper) public view virtual override returns (address, address) {
         UniswapV4Wrapper v4wrapper = UniswapV4Wrapper(payable(_wrapper));
         Currency currency0 = v4wrapper.currency0();
@@ -64,13 +63,12 @@ contract UniswapV4Vault is BaseVault {
         (sqrtPriceX96,,,) = poolManager.getSlot0(poolKey.toId());
     }
 
-    // TODO: gas can be saved here by directly sending the tokens to the position manager
     function _mintPosition(uint256 token0Amount, uint256 token1Amount, uint128 liquidity)
         internal
         override
-        returns (uint256 tokenId)
+        returns (uint256 newTokenId)
     {
-        tokenId = IPositionManager(address(positionManager)).nextTokenId();
+        newTokenId = IPositionManager(address(positionManager)).nextTokenId();
 
         bytes memory actionData = abi.encode(
             poolKey, tickLower, tickUpper, liquidity, token0Amount + 1, token1Amount + 1, address(wrapper), ""
@@ -84,12 +82,9 @@ contract UniswapV4Vault is BaseVault {
         _callModifyLiquidity(uint8(Actions.INCREASE_LIQUIDITY), actionData, token0Amount, token1Amount);
     }
 
-    function _callModifyLiquidity(
-        uint8 actionType, // either Actions.MINT_POSITION or Actions.INCREASE_LIQUIDITY
-        bytes memory actionData, // encoded params for first action
-        uint256 token0Amount,
-        uint256 token1Amount
-    ) internal {
+    function _callModifyLiquidity(uint8 actionType, bytes memory actionData, uint256 token0Amount, uint256 token1Amount)
+        internal
+    {
         bytes memory actions = new bytes(5);
         actions[0] = bytes1(actionType);
         actions[1] = bytes1(uint8(Actions.SETTLE));
@@ -104,16 +99,30 @@ contract UniswapV4Vault is BaseVault {
         params[3] = abi.encode(poolKey.currency0, _msgSender());
         params[4] = abi.encode(poolKey.currency1, _msgSender());
 
+        // V4 pool settle rounds up by 1 in the two-sided case (getLiquidityForAmounts
+        // → getAmountsForLiquidity roundtrip).  Provide up to +2 extra for each
+        // currency, capped at the vault's actual balance so normal single-sided
+        // operations (where we only hold the exact required amount) are unaffected.
         if (poolKey.currency0.isAddressZero()) {
-            IWETH9(weth).withdraw(token0Amount);
+            uint256 wethBal = IERC20(weth).balanceOf(address(this));
+            IWETH9(weth).withdraw(Math.min(wethBal, token0Amount + 2));
         } else {
-            poolKey.currency0.transfer(address(positionManager), token0Amount);
+            address c0 = Currency.unwrap(poolKey.currency0);
+            uint256 c0Bal = IERC20(c0).balanceOf(address(this));
+            poolKey.currency0.transfer(address(positionManager), Math.min(c0Bal, token0Amount + 2));
         }
-        poolKey.currency1.transfer(address(positionManager), token1Amount);
+        address c1 = Currency.unwrap(poolKey.currency1);
+        uint256 c1Bal = IERC20(c1).balanceOf(address(this));
+        poolKey.currency1.transfer(address(positionManager), Math.min(c1Bal, token1Amount + 2));
 
         IPositionManager(address(positionManager)).modifyLiquidities{value: address(this).balance}(
             abi.encode(actions, params), block.timestamp
         );
+
+        // Wrap any ETH swept back by the SWEEP action so it stays as WETH collateral.
+        if (address(this).balance > 0) {
+            IWETH9(weth).deposit{value: address(this).balance}();
+        }
     }
 
     function _decreaseLiquidity(uint256 token0Amount, uint256 token1Amount, uint128 liquidity) internal override {
@@ -122,9 +131,28 @@ contract UniswapV4Vault is BaseVault {
         actions[1] = bytes1(uint8(Actions.TAKE_PAIR));
 
         bytes[] memory params = new bytes[](2);
-        //TODO: figure out why token0Amount - 1 and token1Amount - 1 as minimum amounts is not working here
-        //  params[0] = abi.encode(tokenId, liquidity, token0Amount - 1, token1Amount - 1, "");
         params[0] = abi.encode(tokenId, liquidity, 0, 0, "");
+        params[1] = abi.encode(poolKey.currency0, poolKey.currency1, ActionConstants.MSG_SENDER);
+
+        IPositionManager(address(positionManager)).modifyLiquidities(abi.encode(actions, params), block.timestamp);
+
+        if (poolKey.currency0.isAddressZero()) {
+            IWETH9(weth).deposit{value: address(this).balance}();
+        }
+    }
+
+    /// @dev In V4, TAKE_PAIR inside _decreaseLiquidity already collects everything.
+    ///      Only attempt a fees-only collect when there is still liquidity remaining
+    ///      (calling DECREASE_LIQUIDITY on an empty position reverts).
+    function _collectAll() internal override {
+        if (_getCurrentLiquidity() == 0) return;
+
+        bytes memory actions = new bytes(2);
+        actions[0] = bytes1(uint8(Actions.DECREASE_LIQUIDITY));
+        actions[1] = bytes1(uint8(Actions.TAKE_PAIR));
+
+        bytes[] memory params = new bytes[](2);
+        params[0] = abi.encode(tokenId, uint128(0), 0, 0, "");
         params[1] = abi.encode(poolKey.currency0, poolKey.currency1, ActionConstants.MSG_SENDER);
 
         IPositionManager(address(positionManager)).modifyLiquidities(abi.encode(actions, params), block.timestamp);
@@ -140,6 +168,4 @@ contract UniswapV4Vault is BaseVault {
             poolId, address(positionManager), position.tickLower(), position.tickUpper(), bytes32(tokenId)
         );
     }
-
-    receive() external payable {}
 }

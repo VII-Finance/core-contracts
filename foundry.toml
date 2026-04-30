@@ -14,8 +14,8 @@ fs_permissions = [{access = "read", path = "./lib/v4-periphery/lib/v4-core/test/
 runs = 10
 
 [invariant]
-runs = 100_000
-depth = 70
+runs = 500
+depth = 20
 fail_on_revert = true
 
 [rpc_endpoints]

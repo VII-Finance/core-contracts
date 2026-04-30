@@ -8,17 +8,17 @@ import {UniswapV3Wrapper} from "src/uniswap/UniswapV3Wrapper.sol";
 import {IUniswapV3Pool} from "lib/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IEVault} from "lib/euler-interfaces/interfaces/IEVault.sol";
 import {INonfungiblePositionManager} from "lib/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol";
-import {UniswapPositionValueHelper} from "src/libraries/UniswapPositionValueHelper.sol";
 
 contract UniswapV3Vault is BaseVault {
     IUniswapV3Pool public immutable pool;
     uint24 public immutable fee;
 
-    constructor(IERC721WrapperBase _wrapper, IERC20 _asset, IEVault _borrowVault)
-        BaseVault(_wrapper, _asset, _borrowVault)
+    constructor(IERC721WrapperBase _wrapper, IERC20 _asset, IEVault _borrowVault, uint256 _targetLeverage)
+        BaseVault(_wrapper, _asset, _borrowVault, _targetLeverage)
     {
         pool = UniswapV3Wrapper(address(_wrapper)).pool();
         fee = UniswapV3Wrapper(address(_wrapper)).fee();
+        tickSpacing = pool.tickSpacing();
     }
 
     function _getTokens(address _wrapper) public view virtual override returns (address, address) {
@@ -36,7 +36,7 @@ contract UniswapV3Vault is BaseVault {
     function _mintPosition(uint256 token0Amount, uint256 token1Amount, uint128)
         internal
         override
-        returns (uint256 tokenId)
+        returns (uint256 newTokenId)
     {
         INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({
             token0: isTokenBeingBorrowedToken0() ? borrowToken : address(asset()),
@@ -46,13 +46,13 @@ contract UniswapV3Vault is BaseVault {
             tickUpper: tickUpper,
             amount0Desired: token0Amount,
             amount1Desired: token1Amount,
-            amount0Min: token0Amount - 1,
-            amount1Min: token1Amount - 1,
+            amount0Min: token0Amount > 0 ? token0Amount - 1 : 0,
+            amount1Min: token1Amount > 0 ? token1Amount - 1 : 0,
             recipient: address(wrapper),
             deadline: block.timestamp
         });
 
-        (tokenId,,,) = INonfungiblePositionManager(address(positionManager)).mint(params);
+        (newTokenId,,,) = INonfungiblePositionManager(address(positionManager)).mint(params);
     }
 
     function _increaseLiquidity(uint256 token0Amount, uint256 token1Amount, uint128) internal override {
@@ -61,8 +61,8 @@ contract UniswapV3Vault is BaseVault {
                 tokenId: tokenId,
                 amount0Desired: token0Amount,
                 amount1Desired: token1Amount,
-                amount0Min: token0Amount - 1,
-                amount1Min: token1Amount - 1,
+                amount0Min: token0Amount > 0 ? token0Amount - 1 : 0,
+                amount1Min: token1Amount > 0 ? token1Amount - 1 : 0,
                 deadline: block.timestamp
             });
 
@@ -74,8 +74,8 @@ contract UniswapV3Vault is BaseVault {
             INonfungiblePositionManager.DecreaseLiquidityParams({
                 tokenId: tokenId,
                 liquidity: liquidity,
-                amount0Min: token0Amount - 1,
-                amount1Min: token1Amount - 1,
+                amount0Min: token0Amount > 0 ? token0Amount - 1 : 0,
+                amount1Min: token1Amount > 0 ? token1Amount - 1 : 0,
                 deadline: block.timestamp
             });
 
@@ -86,6 +86,14 @@ contract UniswapV3Vault is BaseVault {
             tokenId: tokenId, recipient: address(this), amount0Max: uint128(amount0), amount1Max: uint128(amount1)
         });
 
+        INonfungiblePositionManager(address(positionManager)).collect(collectParams);
+    }
+
+    /// @dev Collects ALL accrued fees + any owed tokens from the current position.
+    function _collectAll() internal override {
+        INonfungiblePositionManager.CollectParams memory collectParams = INonfungiblePositionManager.CollectParams({
+            tokenId: tokenId, recipient: address(this), amount0Max: type(uint128).max, amount1Max: type(uint128).max
+        });
         INonfungiblePositionManager(address(positionManager)).collect(collectParams);
     }
 

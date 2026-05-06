@@ -21,29 +21,20 @@ abstract contract BaseVaultTest is UniswapBaseTest, ERC4626Test {
 
     // ─── Setup ────────────────────────────────────────────────────────────────
 
-    function setUp() public virtual override(UniswapBaseTest, ERC4626Test) {
-        UniswapBaseTest.setUp();
-        vault = deployVault();
-
-        // Wire keeper via prank (keeper slot starts as address(0), so anyone can set it once)
-        vm.prank(address(0));
-        // keeper is address(0) at construction; set it by having address(0) call setKeeper
-        // Actually address(0) can't call; use the workaround: first call is from address(0)
-        // Let's set it from the test by direct storage manipulation
-        vm.store(address(vault), bytes32(uint256(7)), bytes32(uint256(uint160(vaultKeeper))));
-
-        // ERC4626Test wiring
-        _underlying_ = vault.asset();
-        _vault_ = address(vault);
-        _delta_ = 10; // 10 wei tolerance for rounding
-        _vaultMayBeEmpty = false;
-        _unlimitedAmount = false;
-
-        // Initialize vault so ERC4626 tests see a live vault
-        _initVaultForTests();
-    }
+    function setUp() public virtual override(UniswapBaseTest, ERC4626Test) {}
 
     function deployVault() internal virtual returns (BaseVault);
+
+    function _setUpVault() internal {
+        vault = deployVault();
+        vm.store(address(vault), bytes32(uint256(7)), bytes32(uint256(uint160(vaultKeeper))));
+        _underlying_ = vault.asset();
+        _vault_ = address(vault);
+        _delta_ = 10;
+        _vaultMayBeEmpty = false;
+        _unlimitedAmount = false;
+        _initVaultForTests();
+    }
 
     // ─── Vault initialisation helper ─────────────────────────────────────────
 
@@ -80,7 +71,7 @@ abstract contract BaseVaultTest is UniswapBaseTest, ERC4626Test {
             _approve(vault.asset(), user, address(vault), assets);
             vm.prank(user);
             try vault.deposit(assets, user) {}
-                catch {
+            catch {
                 vm.assume(false);
             }
 

@@ -2,6 +2,8 @@
 pragma solidity 0.8.26;
 
 import {BaseVaultTest} from "test/uniswap/vault/BaseVault.t.sol";
+import {UniswapBaseTestFork} from "test/uniswap/UniswapBase.t.sol";
+import {UniswapBaseTestLocal} from "test/uniswap/setup/UniswapBaseLocal.sol";
 import {ERC721WrapperBase} from "src/ERC721WrapperBase.sol";
 import {IPositionManager} from "lib/v4-periphery/src/interfaces/IPositionManager.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -18,49 +20,22 @@ import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.so
 import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {UniswapMintPositionHelper} from "src/uniswap/periphery/UniswapMintPositionHelper.sol";
 import {TickMath} from "lib/v4-periphery/lib/v4-core/src/libraries/TickMath.sol";
+import {Constants} from "lib/v4-periphery/lib/v4-core/test/utils/Constants.sol";
 
-contract UniswapV4VaultTest is BaseVaultTest {
+// ─── Shared V4 vault test body ────────────────────────────────────────────────
+
+abstract contract UniswapV4VaultTestBase is BaseVaultTest {
     using SafeERC20 for IERC20;
     using StateLibrary for IPoolManager;
 
-    IPositionManager public positionManager = IPositionManager(Addresses.POSITION_MANAGER);
+    IPositionManager public positionManager;
     PoolKey public poolKey;
     PoolId public poolId;
     Currency currency0;
     Currency currency1;
-    IPoolManager poolManager = IPoolManager(Addresses.POOL_MANAGER);
+    IPoolManager poolManager;
 
     UniswapV4Vault v4Vault;
-
-    function setUp() public override {
-        initialAmount = 1e18; // 1 WETH
-        BaseVaultTest.setUp();
-        v4Vault = UniswapV4Vault(payable(address(vault)));
-    }
-
-    function deployVault() internal override returns (BaseVault) {
-        return new UniswapV4Vault(wrapper, IERC20(Addresses.WETH), eVault, 2e18);
-    }
-
-    function deployWrapper() internal override returns (ERC721WrapperBase) {
-        currency0 = Currency.wrap(address(0)); // native ETH
-        currency1 = Currency.wrap(address(Addresses.USDC));
-
-        token0 = Addresses.WETH;
-        token1 = Addresses.USDC;
-
-        poolKey =
-            PoolKey({currency0: currency0, currency1: currency1, fee: 500, tickSpacing: 10, hooks: IHooks(address(0))});
-        poolId = poolKey.toId();
-
-        ERC721WrapperBase w = new MockUniswapV4Wrapper{salt: bytes32(uint256(1))}(
-            address(evc), address(positionManager), address(oracle), unitOfAccount, poolKey, Addresses.WETH
-        );
-        mintPositionHelper = new UniswapMintPositionHelper(
-            address(evc), Addresses.NON_FUNGIBLE_POSITION_MANAGER, address(positionManager)
-        );
-        return w;
-    }
 
     // ─── V4-specific: changeTicks ─────────────────────────────────────────────
 
@@ -70,7 +45,7 @@ contract UniswapV4VaultTest is BaseVaultTest {
 
         (uint160 sqrtP,,,) = poolManager.getSlot0(poolId);
         int24 currentTick = TickMath.getTickAtSqrtPrice(sqrtP);
-        int24 ts = 10; // tickSpacing for this pool
+        int24 ts = 10;
         int24 newLower = ((currentTick - 500) / ts) * ts;
         int24 newUpper = ((currentTick + 500) / ts) * ts;
 
@@ -116,16 +91,6 @@ contract UniswapV4VaultTest is BaseVaultTest {
         assertGt(shares, 0, "deposit works after changeTicks");
     }
 
-    // ─── V4-specific: pool references ─────────────────────────────────────────
-
-    function test_poolManagerStored() public view {
-        assertEq(address(v4Vault.poolManager()), Addresses.POOL_MANAGER);
-    }
-
-    function test_wethStored() public view {
-        assertEq(v4Vault.weth(), Addresses.WETH);
-    }
-
     // ─── Leverage check ───────────────────────────────────────────────────────
 
     function test_leverageApprox2x() public view {
@@ -142,9 +107,103 @@ contract UniswapV4VaultTest is BaseVaultTest {
     // ─── Fuzz ────────────────────────────────────────────────────────────────
 
     function testFuzz_getDebtAmount_nonzero(uint256 assets) public view {
-        assets = bound(assets, 1e15, 10e18);
+        assets = bound(assets, initialAmount / 1000, initialAmount * 10);
         (uint256 debtAmount, uint128 liquidity) = vault.getDebtAmount(assets);
         assertGt(debtAmount, 0);
         assertGt(liquidity, 0);
+    }
+}
+
+// ─── Fork test ────────────────────────────────────────────────────────────────
+
+contract UniswapV4VaultForkTest is UniswapV4VaultTestBase, UniswapBaseTestFork {
+    function setUp() public override(BaseVaultTest, UniswapBaseTestFork) {
+        initialAmount = 1e18; // 1 WETH
+        UniswapBaseTestFork.setUp();
+        _setUpVault();
+        v4Vault = UniswapV4Vault(payable(address(vault)));
+    }
+
+    function deployWrapper() internal override returns (ERC721WrapperBase) {
+        positionManager = IPositionManager(Addresses.POSITION_MANAGER);
+        poolManager = IPoolManager(Addresses.POOL_MANAGER);
+
+        currency0 = Currency.wrap(address(0)); // native ETH
+        currency1 = Currency.wrap(address(Addresses.USDC));
+
+        token0 = Addresses.WETH;
+        token1 = Addresses.USDC;
+
+        poolKey =
+            PoolKey({currency0: currency0, currency1: currency1, fee: 500, tickSpacing: 10, hooks: IHooks(address(0))});
+        poolId = poolKey.toId();
+
+        ERC721WrapperBase w = new MockUniswapV4Wrapper{salt: bytes32(uint256(1))}(
+            address(evc), address(positionManager), address(oracle), unitOfAccount, poolKey, Addresses.WETH
+        );
+        mintPositionHelper = new UniswapMintPositionHelper(
+            address(evc), Addresses.NON_FUNGIBLE_POSITION_MANAGER, address(positionManager)
+        );
+        return w;
+    }
+
+    function deployVault() internal override returns (BaseVault) {
+        return new UniswapV4Vault(wrapper, IERC20(Addresses.WETH), eVault, 2e18);
+    }
+
+    // ─── Fork-only: check stored addresses ───────────────────────────────────
+
+    function test_poolManagerStored() public view {
+        assertEq(address(v4Vault.poolManager()), Addresses.POOL_MANAGER);
+    }
+
+    function test_wethStored() public view {
+        assertEq(v4Vault.weth(), Addresses.WETH);
+    }
+}
+
+// ─── Local test ───────────────────────────────────────────────────────────────
+
+contract UniswapV4VaultTest is UniswapV4VaultTestBase, UniswapBaseTestLocal {
+    function setUp() public override(BaseVaultTest, UniswapBaseTestLocal) {
+        initialAmount = 1e18;
+        UniswapBaseTestLocal.setUp();
+        _setUpVault();
+        v4Vault = UniswapV4Vault(payable(address(vault)));
+    }
+
+    function deployWrapper() internal override returns (ERC721WrapperBase) {
+        positionManager = localPositionManager;
+        poolManager = localPoolManager;
+
+        currency0 = Currency.wrap(token0);
+        currency1 = Currency.wrap(token1);
+
+        poolKey =
+            PoolKey({currency0: currency0, currency1: currency1, fee: 500, tickSpacing: 10, hooks: IHooks(address(0))});
+        poolId = poolKey.toId();
+        localPoolManager.initialize(poolKey, Constants.SQRT_PRICE_1_1);
+
+        ERC721WrapperBase w = new MockUniswapV4Wrapper{salt: bytes32(uint256(1))}(
+            address(evc), address(positionManager), address(oracle), unitOfAccount, poolKey, address(localWeth)
+        );
+        mintPositionHelper = new UniswapMintPositionHelper(address(evc), address(localNFPM), address(positionManager));
+        return w;
+    }
+
+    function deployVault() internal override returns (BaseVault) {
+        // asset = token0; borrowToken = token1 = eVault.asset() in local setup
+        return new UniswapV4Vault(wrapper, IERC20(token0), eVault, 2e18);
+    }
+
+    // ─── Local: check stored addresses ───────────────────────────────────────
+
+    function test_poolManagerStored() public view {
+        assertEq(address(v4Vault.poolManager()), address(localPoolManager));
+    }
+
+    function test_wethStored() public view {
+        // Local pool uses ERC20/ERC20 (no native ETH), so weth is not set in the wrapper
+        assertEq(v4Vault.weth(), address(0));
     }
 }

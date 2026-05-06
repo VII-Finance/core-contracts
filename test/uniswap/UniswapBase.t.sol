@@ -21,16 +21,18 @@ import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {FixedPoint96} from "lib/v3-core/contracts/libraries/FixedPoint96.sol";
 import {IMockUniswapWrapper} from "test/helpers/IMockUniswapWrapper.sol";
 
-contract UniswapBaseTest is Test, Fuzzers {
+// ─── Shared abstract base ─────────────────────────────────────────────────────
+// Holds all state, helpers, and test-body helpers shared between fork and local.
+// Concrete setUp is provided by UniswapBaseTestFork (below) or UniswapBaseTestLocal
+// (test/uniswap/setup/UniswapBaseLocal.sol).
+abstract contract UniswapBaseTest is Test, Fuzzers {
     uint256 constant INTERNAL_DEBT_PRECISION_SHIFT = 31;
 
     // Allow a small margin of error due to rounding when converting token amounts to unit of account.
-    // The maximum error is 1 wei in the raw token amounts, which translates to 10 ** (18 - (token0.decimals()) + 10 ** (18- token1.decimals()) in the unit of account.
-    // This is assuming that token0 and token1 are worth almost 1 dollar
     uint256 constant ALLOWED_PRECISION_IN_TESTS = 2 * 1e13;
 
     IEVC evc;
-    IEVault eVault; //an evk vault
+    IEVault eVault;
 
     IERC20 asset;
 
@@ -53,46 +55,17 @@ contract UniswapBaseTest is Test, Fuzzers {
 
     uint256 tokenId;
 
+    function setUp() public virtual {}
+
+    // ─── Hooks ────────────────────────────────────────────────────────────────
+
     function deployWrapper() internal virtual returns (ERC721WrapperBase) {}
 
-    function setUp() public virtual {
-        string memory fork_url = vm.envString("MAINNET_RPC_URL");
-        vm.createSelectFork(fork_url, 24991233);
+    /// @dev Override to change the wrapper's UOA price in a way compatible with the
+    ///      oracle in use (EulerRouter on fork, MockPriceOracle locally).
+    function _setWrapperUOAPrice(uint256 price) internal virtual;
 
-        evc = IEVC(Addresses.EVC);
-        eVault = IEVault(Addresses.EULER_USDC_VAULT); //euler prime USDC
-        asset = IERC20(eVault.asset());
-
-        unitOfAccount = eVault.unitOfAccount();
-        oracle = IPriceOracle(eVault.oracle());
-
-        address tokenA = eVault.asset(); //USDC
-        address tokenB = Addresses.USDT;
-
-        (token0, token1) = (tokenA < tokenB) ? (tokenA, tokenB) : (tokenB, tokenA);
-        wrapper = deployWrapper();
-
-        unit0 = 10 ** IERC20Metadata(token0).decimals();
-        unit1 = 10 ** IERC20Metadata(token1).decimals();
-
-        deal(token0, borrower, 100 * unit0);
-        deal(token1, borrower, 100 * unit1);
-
-        FixedRateOracle fixedRateOracle = new FixedRateOracle(
-            address(wrapper),
-            unitOfAccount,
-            1e18 // 1:1 price, This is because we know unitOfAccount is usd and it's decimals are 18
-        );
-
-        address oracleGovernor = IEulerRouter(address(oracle)).governor();
-        startHoax(oracleGovernor);
-        IEulerRouter(address(oracle)).govSetConfig(address(wrapper), unitOfAccount, address(fixedRateOracle));
-
-        address governorAdmin = eVault.governorAdmin();
-        startHoax(governorAdmin);
-        eVault.setLTV(address(wrapper), 0.9e4, 0.9e4, 0);
-        vm.stopPrank();
-    }
+    // ─── Shared helpers ───────────────────────────────────────────────────────
 
     struct LiquidityParams {
         int256 liquidityDelta;
@@ -111,8 +84,9 @@ contract UniswapBaseTest is Test, Fuzzers {
 
         int256 liquidityMaxPerTick = int256(uint256(Pool.tickSpacingToMaxLiquidityPerTick(tickSpacing)));
 
+        // Cap at half max so setUp + fuzz positions sharing a tick can't overflow liquidityGross.
         int256 liquidityMax =
-            liquidityDeltaFromAmounts > liquidityMaxPerTick ? liquidityMaxPerTick : liquidityDeltaFromAmounts;
+            liquidityDeltaFromAmounts > liquidityMaxPerTick / 2 ? liquidityMaxPerTick / 2 : liquidityDeltaFromAmounts;
         _vm.assume(liquidityMax != 0);
         params.liquidityDelta = bound(liquidityDeltaFromAmounts, 1, liquidityMax);
 
@@ -218,19 +192,7 @@ contract UniswapBaseTest is Test, Fuzzers {
         assertEq(maxRepay, 0);
         assertEq(yield, 0);
 
-        startHoax(IEulerRouter(address(oracle)).governor());
-        IEulerRouter(address(oracle))
-            .govSetConfig(
-                address(wrapper),
-                unitOfAccount,
-                address(
-                    new FixedRateOracle(
-                        address(wrapper),
-                        unitOfAccount,
-                        0.25e17 //in the actual conditions this price will always be the fixed 1:1, the balanceOf(user) will change as the price of the underlying tokens change and the position becomes liquidatable
-                    )
-                )
-            );
+        _setWrapperUOAPrice(0.25e17);
 
         startHoax(liquidator);
         (maxRepay, yield) = eVault.checkLiquidation(liquidator, borrower, address(wrapper));
@@ -252,8 +214,6 @@ contract UniswapBaseTest is Test, Fuzzers {
         pure
         returns (uint256 priceInQuoteDecimals)
     {
-        // price = (sqrtPriceX96^2 * 1e18) / 2^192
-        // priceIn18 = FullMath.mulDiv(uint256(sqrtPriceX96) * uint256(sqrtPriceX96), 10 ** token0Decimals, 1 << 192);
         uint256 amount0 = FullMath.mulDiv(1e18, FixedPoint96.Q96, sqrtPriceX96);
         uint256 amount1 = FullMath.mulDiv(1e18, sqrtPriceX96, FixedPoint96.Q96);
 
@@ -282,5 +242,52 @@ contract UniswapBaseTest is Test, Fuzzers {
         uint256 expectedPriceInBaseDecimals = 10 ** (baseTokenDecimals + quoteTokenDecimals) / priceInQuoteDecimals;
 
         assertApproxEqAbs(computedReversePriceInBaseDecimals, expectedPriceInBaseDecimals, unitQuoteToken);
+    }
+}
+
+// ─── Fork setUp provider ──────────────────────────────────────────────────────
+// Deploys against a mainnet fork. All fork test contracts inherit this.
+abstract contract UniswapBaseTestFork is UniswapBaseTest {
+    function setUp() public virtual override {
+        string memory fork_url = vm.envString("MAINNET_RPC_URL");
+        vm.createSelectFork(fork_url, 24991233);
+
+        evc = IEVC(Addresses.EVC);
+        eVault = IEVault(Addresses.EULER_USDC_VAULT);
+        asset = IERC20(eVault.asset());
+
+        unitOfAccount = eVault.unitOfAccount();
+        oracle = IPriceOracle(eVault.oracle());
+
+        address tokenA = eVault.asset(); //USDC
+        address tokenB = Addresses.USDT;
+
+        (token0, token1) = (tokenA < tokenB) ? (tokenA, tokenB) : (tokenB, tokenA);
+        wrapper = deployWrapper();
+
+        unit0 = 10 ** IERC20Metadata(token0).decimals();
+        unit1 = 10 ** IERC20Metadata(token1).decimals();
+
+        deal(token0, borrower, 100 * unit0);
+        deal(token1, borrower, 100 * unit1);
+
+        FixedRateOracle fixedRateOracle = new FixedRateOracle(address(wrapper), unitOfAccount, 1e18);
+
+        address oracleGovernor = IEulerRouter(address(oracle)).governor();
+        startHoax(oracleGovernor);
+        IEulerRouter(address(oracle)).govSetConfig(address(wrapper), unitOfAccount, address(fixedRateOracle));
+
+        address governorAdmin = eVault.governorAdmin();
+        startHoax(governorAdmin);
+        eVault.setLTV(address(wrapper), 0.9e4, 0.9e4, 0);
+        vm.stopPrank();
+    }
+
+    function _setWrapperUOAPrice(uint256 price) internal override {
+        startHoax(IEulerRouter(address(oracle)).governor());
+        IEulerRouter(address(oracle))
+            .govSetConfig(
+                address(wrapper), unitOfAccount, address(new FixedRateOracle(address(wrapper), unitOfAccount, price))
+            );
     }
 }

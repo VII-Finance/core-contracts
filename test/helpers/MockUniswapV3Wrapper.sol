@@ -21,8 +21,8 @@ contract MockUniswapV3Wrapper is UniswapV3Wrapper {
         INonfungiblePositionManager(address(underlying))
             .collect(
                 INonfungiblePositionManager.CollectParams({
-                    tokenId: tokenId, recipient: address(0), amount0Max: 1, amount1Max: 1
-                })
+                tokenId: tokenId, recipient: address(0), amount0Max: 1, amount1Max: 1
+            })
             );
 
         (,,,,,,,,,, uint256 tokensOwed0After, uint256 tokensOwed1After) =

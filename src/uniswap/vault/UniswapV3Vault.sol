@@ -21,7 +21,7 @@ contract UniswapV3Vault is BaseVault {
         tickSpacing = pool.tickSpacing();
     }
 
-    function _getTokens(address _wrapper) public view virtual override returns (address, address) {
+    function _getTokens(address _wrapper) internal view virtual override returns (address, address) {
         return (UniswapV3Wrapper(_wrapper).token0(), UniswapV3Wrapper(_wrapper).token1());
     }
 

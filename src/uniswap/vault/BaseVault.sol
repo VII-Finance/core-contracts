@@ -72,6 +72,7 @@ abstract contract BaseVault is ERC4626, EVCUtil {
     error InvalidTicks();
     error SwapOutputTooLow();
     error VaultNotInitialized();
+    error InvalidLeverage();
 
     event KeeperSet(address indexed oldKeeper, address indexed newKeeper);
 
@@ -83,7 +84,7 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         ERC4626(_asset)
         EVCUtil(IEVCUtil(address(_wrapper)).EVC())
     {
-        require(_targetLeverage > 1e18, "leverage must be > 1");
+        if (_targetLeverage <= 1e18) revert InvalidLeverage();
         wrapper = _wrapper;
         borrowVault = _borrowVault;
         TARGET_LEVERAGE = _targetLeverage;
@@ -122,7 +123,7 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         genericRouter = new GenericRouter();
     }
 
-    function _getTokens(address _wrapper) public view virtual returns (address, address);
+    function _getTokens(address _wrapper) internal view virtual returns (address, address);
 
     // ─── Keeper ──────────────────────────────────────────────────────────────
 
@@ -148,22 +149,13 @@ abstract contract BaseVault is ERC4626, EVCUtil {
 
         IEVC.BatchItem[] memory batchItems = new IEVC.BatchItem[](2);
 
-        batchItems[0] = IEVC.BatchItem({
-            targetContract: address(borrowVault),
-            onBehalfOfAccount: address(this),
-            value: 0,
-            data: abi.encodeWithSelector(IEVault.borrow.selector, debtAmount, address(this))
-        });
+        batchItems[0] = _buildBorrowItem(debtAmount);
 
         uint256 token0Amount = isToken0Borrowed ? debtAmount : assetAmount;
         uint256 token1Amount = isToken0Borrowed ? assetAmount : debtAmount;
 
-        batchItems[1] = IEVC.BatchItem({
-            targetContract: address(this),
-            onBehalfOfAccount: address(this),
-            value: 0,
-            data: abi.encodeWithSelector(this.mintPosition.selector, token0Amount, token1Amount, liquidity)
-        });
+        batchItems[1] =
+            _buildSelfItem(abi.encodeWithSelector(this.mintPosition.selector, token0Amount, token1Amount, liquidity));
 
         evc.batch(batchItems);
 
@@ -185,18 +177,19 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         int256 priceIn18Decimals = (int256(uint256(currentPrice)) * int256(uint256(currentPrice)) * 1e18) >> (96 * 2);
 
         uint256 borrowedAmount = borrowVault.debtOf(address(this));
+        bool isBorrowed0 = isTokenBeingBorrowedToken0();
 
         // net borrow-token position (LP holding + free balance - debt)
-        int256 effectiveBorrowTokenAmount = int256(isTokenBeingBorrowedToken0() ? amount0 : amount1)
+        int256 effectiveBorrowTokenAmount = int256(isBorrowed0 ? amount0 : amount1)
             + int256(IERC20(borrowToken).balanceOf(address(this))) - int256(borrowedAmount);
 
         // convert net borrow-token to asset units
-        int256 effectiveBorrowAmountInAsset = isTokenBeingBorrowedToken0()
+        int256 effectiveBorrowAmountInAsset = isBorrowed0
             ? (effectiveBorrowTokenAmount * 1e18) / priceIn18Decimals
             : (effectiveBorrowTokenAmount * priceIn18Decimals) / 1e18;
 
         return uint256(
-            isTokenBeingBorrowedToken0()
+            isBorrowed0
                 ? int256(amount1) + effectiveBorrowAmountInAsset
                 : int256(amount0) + effectiveBorrowAmountInAsset
         ) + IERC20(asset()).balanceOf(address(this));
@@ -214,29 +207,15 @@ abstract contract BaseVault is ERC4626, EVCUtil {
 
         IEVC.BatchItem[] memory batchItems = new IEVC.BatchItem[](3);
 
-        batchItems[0] = IEVC.BatchItem({
-            targetContract: address(borrowVault),
-            onBehalfOfAccount: address(this),
-            value: 0,
-            data: abi.encodeWithSelector(IEVault.borrow.selector, debtAmount, address(this))
-        });
-
-        batchItems[1] = IEVC.BatchItem({
-            targetContract: address(wrapper),
-            onBehalfOfAccount: address(this),
-            value: 0,
-            data: abi.encodeWithSelector(IPreviewUnwrap.unwrap.selector, address(this), tokenId, address(this))
-        });
+        batchItems[0] = _buildBorrowItem(debtAmount);
+        batchItems[1] = _buildUnwrapItem();
 
         uint256 token0Amount = isToken0Borrowed ? debtAmount : assets;
         uint256 token1Amount = isToken0Borrowed ? assets : debtAmount;
 
-        batchItems[2] = IEVC.BatchItem({
-            targetContract: address(this),
-            onBehalfOfAccount: address(this),
-            value: 0,
-            data: abi.encodeWithSelector(this.increaseLiquidity.selector, token0Amount, token1Amount, liquidity)
-        });
+        batchItems[2] = _buildSelfItem(
+            abi.encodeWithSelector(this.increaseLiquidity.selector, token0Amount, token1Amount, liquidity)
+        );
 
         evc.batch(batchItems);
     }
@@ -253,22 +232,14 @@ abstract contract BaseVault is ERC4626, EVCUtil {
 
         IEVC.BatchItem[] memory batchItems = new IEVC.BatchItem[](3);
 
-        batchItems[0] = IEVC.BatchItem({
-            targetContract: address(wrapper),
-            onBehalfOfAccount: address(this),
-            value: 0,
-            data: abi.encodeWithSelector(IPreviewUnwrap.unwrap.selector, address(this), tokenId, address(this))
-        });
+        batchItems[0] = _buildUnwrapItem();
 
         uint256 token0Amount = isToken0Borrowed ? debtAmount : assets + 1;
         uint256 token1Amount = isToken0Borrowed ? assets + 1 : debtAmount;
 
-        batchItems[1] = IEVC.BatchItem({
-            targetContract: address(this),
-            onBehalfOfAccount: address(this),
-            value: 0,
-            data: abi.encodeWithSelector(this.decreaseLiquidity.selector, token0Amount, token1Amount, liquidity)
-        });
+        batchItems[1] = _buildSelfItem(
+            abi.encodeWithSelector(this.decreaseLiquidity.selector, token0Amount, token1Amount, liquidity)
+        );
 
         batchItems[2] = IEVC.BatchItem({
             targetContract: address(borrowVault),
@@ -315,6 +286,34 @@ abstract contract BaseVault is ERC4626, EVCUtil {
 
     // ─── Rebalance ─────────────────────────────────────────────────────────────
 
+    function _buildUnwrapItem() internal view returns (IEVC.BatchItem memory) {
+        return IEVC.BatchItem({
+            targetContract: address(wrapper),
+            onBehalfOfAccount: address(this),
+            value: 0,
+            data: abi.encodeWithSelector(IPreviewUnwrap.unwrap.selector, address(this), tokenId, address(this))
+        });
+    }
+
+    function _buildBorrowItem(uint256 debtAmount) internal view returns (IEVC.BatchItem memory) {
+        return IEVC.BatchItem({
+            targetContract: address(borrowVault),
+            onBehalfOfAccount: address(this),
+            value: 0,
+            data: abi.encodeWithSelector(IEVault.borrow.selector, debtAmount, address(this))
+        });
+    }
+
+    function _buildSelfItem(bytes memory data) internal view returns (IEVC.BatchItem memory) {
+        return IEVC.BatchItem({targetContract: address(this), onBehalfOfAccount: address(this), value: 0, data: data});
+    }
+
+    function _batchSingleSelf(bytes memory data) internal {
+        IEVC.BatchItem[] memory items = new IEVC.BatchItem[](1);
+        items[0] = _buildSelfItem(data);
+        evc.batch(items);
+    }
+
     function _buildDecreaseLiquidityItem(uint256 amountToSwap) internal view returns (IEVC.BatchItem memory) {
         (uint256 debtAmount, uint128 liquidity) = getDebtAmount(amountToSwap);
         bool b = isTokenBeingBorrowedToken0();
@@ -324,7 +323,7 @@ abstract contract BaseVault is ERC4626, EVCUtil {
             b ? amountToSwap + 1 : debtAmount,
             liquidity
         );
-        return IEVC.BatchItem({targetContract: address(this), onBehalfOfAccount: address(this), value: 0, data: d});
+        return _buildSelfItem(d);
     }
 
     /// @notice Adjusts leverage toward TARGET_LEVERAGE.
@@ -351,46 +350,22 @@ abstract contract BaseVault is ERC4626, EVCUtil {
             // decreaseLiquidity re-wraps the position internally, so no extra wrap step needed
             IEVC.BatchItem[] memory batchItems = new IEVC.BatchItem[](4);
 
-            batchItems[0] = IEVC.BatchItem({
-                targetContract: address(wrapper),
-                onBehalfOfAccount: address(this),
-                value: 0,
-                data: abi.encodeWithSelector(IPreviewUnwrap.unwrap.selector, address(this), tokenId, address(this))
-            });
-
+            batchItems[0] = _buildUnwrapItem();
             batchItems[1] = _buildDecreaseLiquidityItem(amountToSwap);
 
-            batchItems[2] = IEVC.BatchItem({
-                targetContract: address(this),
-                onBehalfOfAccount: address(this),
-                value: 0,
-                data: abi.encodeWithSelector(
-                    this.swapAssetToBorrowToken.selector, amountToSwap, exchange, spender, swapData
-                )
-            });
-
-            batchItems[3] = IEVC.BatchItem({
-                targetContract: address(this),
-                onBehalfOfAccount: address(this),
-                value: 0,
-                data: abi.encodeWithSelector(this.repayContractBalance.selector)
-            });
+            batchItems[2] = _buildSelfItem(
+                abi.encodeWithSelector(this.swapAssetToBorrowToken.selector, amountToSwap, exchange, spender, swapData)
+            );
+            batchItems[3] = _buildSelfItem(abi.encodeWithSelector(this.repayContractBalance.selector));
 
             evc.batch(batchItems);
         } else if (currentLeverage < TARGET_LEVERAGE) {
             // Under-leveraged: borrow more, swap borrow → asset, add liquidity
-            IEVC.BatchItem[] memory batchItems = new IEVC.BatchItem[](1);
-
-            batchItems[0] = IEVC.BatchItem({
-                targetContract: address(this),
-                onBehalfOfAccount: address(this),
-                value: 0,
-                data: abi.encodeWithSelector(
+            _batchSingleSelf(
+                abi.encodeWithSelector(
                     this.borrowSwapBorrowIncreaseLiquidity.selector, amountToSwap, exchange, spender, swapData
                 )
-            });
-
-            evc.batch(batchItems);
+            );
         }
     }
 
@@ -410,16 +385,11 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         if (newTickLower % tickSpacing != 0 || newTickUpper % tickSpacing != 0) revert InvalidTicks();
         if (tokenId == 0) revert VaultNotInitialized();
 
-        IEVC.BatchItem[] memory items = new IEVC.BatchItem[](1);
-        items[0] = IEVC.BatchItem({
-            targetContract: address(this),
-            onBehalfOfAccount: address(this),
-            value: 0,
-            data: abi.encodeWithSelector(
+        _batchSingleSelf(
+            abi.encodeWithSelector(
                 this.executeChangeTicks.selector, newTickLower, newTickUpper, exchange, spender, swapData
             )
-        });
-        evc.batch(items);
+        );
     }
 
     /// @dev Inner body of changeTicks, executed via EVC batch so health checks are deferred.
@@ -468,10 +438,7 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         if (liquidity > 0) {
             (uint256 t0Needed, uint256 t1Needed) =
                 LiquidityAmounts.getAmountsForLiquidity(sqrtP, sqrtL, sqrtU, liquidity);
-            uint256 newTokenId = _mintPosition(t0Needed, t1Needed, liquidity);
-            tokenId = newTokenId;
-            wrapper.skim(address(this));
-            wrapper.enableTokenIdAsCollateral(newTokenId);
+            _mintAndRegisterPosition(t0Needed, t1Needed, liquidity);
         }
     }
 
@@ -489,12 +456,16 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         wrapper.wrap(tokenId, address(this));
     }
 
-    function decreaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) public onlySelfCallFromEVC {
+    function decreaseLiquidity(uint256 token0, uint256 token1, uint128 liquidity) external onlySelfCallFromEVC {
         _decreaseLiquidity(token0, token1, liquidity);
         wrapper.wrap(tokenId, address(this));
     }
 
     function mintPosition(uint256 token0, uint256 token1, uint128 liquidity) external onlySelfCallFromEVC {
+        _mintAndRegisterPosition(token0, token1, liquidity);
+    }
+
+    function _mintAndRegisterPosition(uint256 token0, uint256 token1, uint128 liquidity) internal {
         tokenId = _mintPosition(token0, token1, liquidity);
         wrapper.skim(address(this));
         wrapper.enableTokenIdAsCollateral(tokenId);
@@ -504,31 +475,31 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         external
         onlySelfCallFromEVC
     {
-        IERC20(asset()).safeTransfer(address(genericRouter), amountToSwap);
-
-        uint256 borrowTokenBalanceBefore = IERC20(borrowToken).balanceOf(address(this));
-        genericRouter.executeSwap(IERC20(asset()), IERC20(borrowToken), exchange, spender, swapData);
-        uint256 borrowTokensReceived = IERC20(borrowToken).balanceOf(address(this)) - borrowTokenBalanceBefore;
-
-        // Validate output against oracle: must receive at least (1 - slippage) * oracle value
-        uint256 expectedMin =
-            oracle.getQuote(amountToSwap, asset(), borrowToken) * (1e18 - SWAP_SLIPPAGE_TOLERANCE) / 1e18;
-        if (borrowTokensReceived < expectedMin) revert SwapOutputTooLow();
+        _executeValidatedSwap(IERC20(asset()), IERC20(borrowToken), amountToSwap, exchange, spender, swapData);
     }
 
     function swapBorrowToAsset(uint256 amountToSwap, address exchange, address spender, bytes calldata swapData)
         external
         onlySelfCallFromEVC
     {
-        IERC20(borrowToken).safeTransfer(address(genericRouter), amountToSwap);
+        _executeValidatedSwap(IERC20(borrowToken), IERC20(asset()), amountToSwap, exchange, spender, swapData);
+    }
 
-        uint256 assetBalanceBefore = IERC20(asset()).balanceOf(address(this));
-        genericRouter.executeSwap(IERC20(borrowToken), IERC20(asset()), exchange, spender, swapData);
-        uint256 assetsReceived = IERC20(asset()).balanceOf(address(this)) - assetBalanceBefore;
-
-        uint256 expectedMin =
-            oracle.getQuote(amountToSwap, borrowToken, asset()) * (1e18 - SWAP_SLIPPAGE_TOLERANCE) / 1e18;
-        if (assetsReceived < expectedMin) revert SwapOutputTooLow();
+    function _executeValidatedSwap(
+        IERC20 tokenIn,
+        IERC20 tokenOut,
+        uint256 amountToSwap,
+        address exchange,
+        address spender,
+        bytes calldata swapData
+    ) internal returns (uint256 received) {
+        tokenIn.safeTransfer(address(genericRouter), amountToSwap);
+        uint256 balanceBefore = tokenOut.balanceOf(address(this));
+        genericRouter.executeSwap(tokenIn, tokenOut, exchange, spender, swapData);
+        received = tokenOut.balanceOf(address(this)) - balanceBefore;
+        uint256 expectedMin = oracle.getQuote(amountToSwap, address(tokenIn), address(tokenOut))
+            * (1e18 - SWAP_SLIPPAGE_TOLERANCE) / 1e18;
+        if (received < expectedMin) revert SwapOutputTooLow();
     }
 
     function repayContractBalance() external onlySelfCallFromEVC {
@@ -548,14 +519,8 @@ abstract contract BaseVault is ERC4626, EVCUtil {
         borrowVault.borrow(amountToSwap, address(this));
 
         // Step 2: swap borrow → asset
-        IERC20(borrowToken).safeTransfer(address(genericRouter), amountToSwap);
-        uint256 assetBalanceBefore = IERC20(asset()).balanceOf(address(this));
-        genericRouter.executeSwap(IERC20(borrowToken), IERC20(asset()), exchange, spender, swapData);
-        uint256 assetsReceived = IERC20(asset()).balanceOf(address(this)) - assetBalanceBefore;
-
-        uint256 expectedMin =
-            oracle.getQuote(amountToSwap, borrowToken, asset()) * (1e18 - SWAP_SLIPPAGE_TOLERANCE) / 1e18;
-        if (assetsReceived < expectedMin) revert SwapOutputTooLow();
+        uint256 assetsReceived =
+            _executeValidatedSwap(IERC20(borrowToken), IERC20(asset()), amountToSwap, exchange, spender, swapData);
 
         // Step 3: compute additional borrow needed to LP the newly received asset
         (uint256 additionalDebt, uint128 liquidity) = getDebtAmount(assetsReceived);

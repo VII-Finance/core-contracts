@@ -5,6 +5,9 @@
   "lib/euler-interfaces": {
     "rev": "6e32696d2db2f72ae48bbbb4a0b73a8a314b36c8"
   },
+  "lib/euler-price-oracle": {
+    "rev": "f52cb43b587c7fa90a7e722d52698003451feb62"
+  },
   "lib/euler-vault-kit": {
     "rev": "5b98b42048ba11ae82fb62dfec06d1010c8e41e6"
   },

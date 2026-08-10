@@ -150,6 +150,7 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
     /// @dev https://github.com/euler-xyz/euler-price-oracle/#bidask-pricing for more information about the bid/ask pricing
     /// @param inAmount  {tok} amount of `base` token to price (D{tokenDecimals})
     /// @return outAmount {UoA} value of `inAmount` in unit-of-account terms (D{unitOfAccountDecimals})
+    /// Note: For now, oracles that provide different mid, bid and ask prices are not supported
     function getQuote(uint256 inAmount, address base) public view returns (uint256 outAmount) {
         if (evc.isControlCollateralInProgress()) {
             // mid-point price

@@ -170,6 +170,7 @@ abstract contract ERC721WrapperBase is ERC6909TokenSupply, EVCUtil, IERC721Wrapp
         public
         view
         virtual
+        override
         returns (uint160 sqrtRatioX96)
     {
         uint256 token0UnitValue = getQuote(unit0, token0); // {UoA} value of 1 unit of token0

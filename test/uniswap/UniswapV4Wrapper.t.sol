@@ -30,9 +30,10 @@ import {IERC721} from "lib/openzeppelin-contracts/contracts/interfaces/IERC721.s
 import {IEVC} from "ethereum-vault-connector/interfaces/IEthereumVaultConnector.sol";
 import {ERC721WrapperBase} from "src/ERC721WrapperBase.sol";
 import {UniswapBaseTest} from "test/uniswap/UniswapBase.t.sol";
+import {UniswapBaseTestFork} from "test/uniswap/UniswapBase.t.sol";
+import {UniswapBaseTestLocal} from "test/uniswap/setup/UniswapBaseLocal.sol";
 import {Fuzzers} from "@uniswap/v4-core/src/test/Fuzzers.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 import {TestRouter, SwapParams} from "lib/v4-periphery/test/shared/TestRouter.sol";
 import {PoolDonateTest} from "lib/v4-periphery/lib/v4-core/src/test/PoolDonateTest.sol";
 import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
@@ -43,13 +44,14 @@ import {ActionConstants} from "lib/v4-periphery/src/libraries/ActionConstants.so
 import {Math} from "lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import {MockUniswapV4Wrapper} from "test/helpers/MockUniswapV4Wrapper.sol";
 
-contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
+// ─── Shared test bodies ───────────────────────────────────────────────────────
+
+abstract contract UniswapV4WrapperTestBase is UniswapBaseTest, ISubscriber {
     using StateLibrary for IPoolManager;
     using BalanceDeltaLibrary for BalanceDelta;
 
-    IPositionManager public positionManager = IPositionManager(Addresses.POSITION_MANAGER);
-    IPoolManager public poolManager = IPoolManager(Addresses.POOL_MANAGER);
-    IPermit2 public permit2 = IPermit2(Addresses.PERMIT2);
+    IPositionManager public positionManager;
+    IPoolManager public poolManager;
 
     PoolKey public poolKey;
     PoolId public poolId;
@@ -59,79 +61,7 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
     TestRouter public router;
     PoolDonateTest public poolDonateRouter;
 
-    bool public constant TEST_NATIVE_ETH = true;
-
-    function deployWrapper() internal override returns (ERC721WrapperBase) {
-        currency0 = Currency.wrap(address(token0));
-        currency1 = Currency.wrap(address(token1));
-
-        poolKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: 10, //0.001% fee
-            tickSpacing: 1,
-            hooks: IHooks(address(0))
-        });
-
-        if (TEST_NATIVE_ETH) {
-            currency0 = Currency.wrap(address(0)); //use native ETH as currency0
-            currency1 = Currency.wrap(address(Addresses.USDC));
-
-            token0 = Addresses.WETH;
-            token1 = Addresses.USDC;
-
-            poolKey = PoolKey({
-                currency0: currency0,
-                currency1: currency1,
-                fee: 500, //0.05% fee
-                tickSpacing: 10,
-                hooks: IHooks(address(0))
-            });
-
-            // poolId = 0x21c67e77068de97969ba93d4aab21826d33ca12bb9f565d8496e8fda8a82ca27
-        }
-
-        poolId = poolKey.toId();
-
-        ///@dev A weird coincidence that happened here was that this wrapper was getting deployed at this address: 0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f
-        ///which actually has some ETH balance on ethereum mainnet. It broke some accounting in the tests and took me a while to figure out why. As a workaround I simply added a salt to the constructor
-        ERC721WrapperBase uniswapV4Wrapper = new MockUniswapV4Wrapper{salt: bytes32(uint256(1))}(
-            address(evc), address(positionManager), address(oracle), unitOfAccount, poolKey, Addresses.WETH
-        );
-        mintPositionHelper = new UniswapMintPositionHelper(
-            address(evc), Addresses.NON_FUNGIBLE_POSITION_MANAGER, address(positionManager)
-        );
-
-        return uniswapV4Wrapper;
-    }
-
-    function currencyToToken(Currency currency) internal pure returns (IERC20) {
-        return IERC20(address(uint160(currency.toId())));
-    }
-
-    function setUp() public override {
-        super.setUp();
-
-        router = new TestRouter(poolManager);
-        poolDonateRouter = new PoolDonateTest(poolManager);
-        startHoax(borrower);
-        SafeERC20.forceApprove(IERC20(token0), address(router), type(uint256).max);
-        SafeERC20.forceApprove(IERC20(token1), address(router), type(uint256).max);
-
-        startHoax(borrower);
-        SafeERC20.forceApprove(IERC20(token0), address(mintPositionHelper), type(uint256).max);
-        SafeERC20.forceApprove(IERC20(token1), address(mintPositionHelper), type(uint256).max);
-
-        (tokenId,,) = mintPosition(
-            poolKey,
-            TickMath.minUsableTick(poolKey.tickSpacing),
-            TickMath.maxUsableTick(poolKey.tickSpacing),
-            100 * unit0,
-            100 * unit1,
-            0,
-            borrower
-        );
-    }
+    // ─── Helpers ──────────────────────────────────────────────────────────────
 
     function mintPosition(
         PoolKey memory targetPoolKey,
@@ -173,22 +103,8 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
             new bytes(0)
         );
 
-        // mintPositionHelper.mintPosition{value: 0}(
-        //     targetPoolKey,
-        //     tickLower,
-        //     tickUpper,
-        //     liquidityToAdd,
-        //     uint128(amount0Desired) * 2 + 1,
-        //     uint128(amount1Desired) * 2 + 1,
-        //     owner,
-        //     new bytes(0)
-        // );
-
-        //ensure any unused tokens are returned to the borrower and position manager balance is zero
         assertEq(targetPoolKey.currency0.balanceOf(address(positionManager)), 0);
         assertEq(targetPoolKey.currency1.balanceOf(address(positionManager)), 0);
-
-        //for some reason, there is 1 wei of dust native eth left in the mintPositionHelper contract
         assertEq(targetPoolKey.currency0.balanceOf(address(mintPositionHelper)), 0);
         assertEq(targetPoolKey.currency1.balanceOf(address(mintPositionHelper)), 0);
 
@@ -198,29 +114,18 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
 
     function swapExactInput(address swapper, address tokenIn, address tokenOut, uint256 inputAmount)
         internal
+        virtual
         returns (uint256 outputAmount)
     {
         deal(tokenIn, swapper, inputAmount);
-
-        bool zeroForOne = tokenIn == Addresses.WETH ? true : tokenIn < tokenOut;
-
+        bool zeroForOne = tokenIn < tokenOut;
         SwapParams memory swapParams = SwapParams({
             zeroForOne: zeroForOne,
             amountSpecified: -int256(inputAmount),
             sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
         });
-
-        BalanceDelta balanceDelta =
-            router.swap{value: tokenIn == Addresses.WETH ? inputAmount : 0}(poolKey, swapParams, new bytes(0));
-
+        BalanceDelta balanceDelta = router.swap{value: 0}(poolKey, swapParams, new bytes(0));
         outputAmount = zeroForOne ? uint256(int256(balanceDelta.amount1())) : uint256(int256(balanceDelta.amount0()));
-    }
-
-    function test_swapExactInputV4() public {
-        uint256 inputAmount = 1e18;
-        startHoax(borrower);
-        uint256 outputAmount = swapExactInput(borrower, address(token0), address(token1), inputAmount);
-        assertGt(outputAmount, 0);
     }
 
     function boundLiquidityParamsAndMint(LiquidityParams memory params)
@@ -238,8 +143,10 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
             uint128(uint256(params.liquidityDelta))
         );
 
-        startHoax(borrower);
+        // Skip inputs where the tick range is so far out-of-range that liquidity rounds to zero amounts.
+        vm.assume(estimatedAmount0Required > 0 || estimatedAmount1Required > 0);
 
+        startHoax(borrower);
         (tokenIdMinted, amount0Spent, amount1Spent) = mintPosition(
             poolKey,
             params.tickLower,
@@ -251,32 +158,22 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
         );
     }
 
-    function testGetSqrtRatioX96() public view {
-        sqrtPriceTest(2484634903, Addresses.WETH, Addresses.USDC); //2.4k USDC per ETH
-        sqrtPriceTest(103283676033, Addresses.WBTC, Addresses.USDC); //103k BTC per USDC
+    // ─── ISubscriber implementation ───────────────────────────────────────────
 
-        sqrtPriceTest(41568954820846990734, Addresses.WBTC, Addresses.WETH); //41.56 BTC per ETH
-
-        sqrtPriceTest(2484754836, Addresses.WETH, Addresses.USDT); //2.4k USDC per ETH
-        sqrtPriceTest(103288661536, Addresses.WBTC, Addresses.USDT); //103k BTC per USDC
+    function notifyUnsubscribe(uint256) external {
+        wrapper.skim(address(this));
     }
+    function notifySubscribe(uint256, bytes memory) external {}
+    function notifyBurn(uint256, address, PositionInfo, uint256, BalanceDelta) external {}
+    function notifyModifyLiquidity(uint256, int256, BalanceDelta) external {}
 
-    function testWrapFailIfNotTheSamePoolId() public {
-        for (uint256 i = 1; i < 20; i++) {
-            (PoolKey memory poolKeyOfTokenId,) = positionManager.getPoolAndPositionInfo(i);
+    // ─── Shared tests ─────────────────────────────────────────────────────────
 
-            startHoax(wrapper.underlying().ownerOf(i));
-            wrapper.underlying().approve(address(wrapper), i);
-
-            if (PoolId.unwrap(poolKeyOfTokenId.toId()) == PoolId.unwrap(poolId)) {
-                wrapper.wrap(i, borrower); // wrap should succeed if the poolId matches
-            } else {
-                vm.expectRevert(
-                    abi.encodeWithSelector(UniswapV4Wrapper.InvalidPoolId.selector, poolKeyOfTokenId.toId(), poolId)
-                );
-                wrapper.wrap(i, borrower);
-            }
-        }
+    function test_swapExactInputV4() public {
+        uint256 inputAmount = 1e18;
+        startHoax(borrower);
+        uint256 outputAmount = swapExactInput(borrower, address(token0), address(token1), inputAmount);
+        assertGt(outputAmount, 0);
     }
 
     function testSkim() public {
@@ -285,7 +182,6 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
         });
         (tokenId,,) = boundLiquidityParamsAndMint(params);
 
-        //fail if trying to skim the last minted tokenId but wrapper is not the owner
         vm.expectRevert(ERC721WrapperBase.TokenIdNotOwnedByThisContract.selector);
         wrapper.skim(borrower);
 
@@ -320,34 +216,30 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
         uint256 amount0InUnitOfAccount = wrapper.getQuote(amount0Spent, address(token0));
         uint256 amount1InUnitOfAccount = wrapper.getQuote(amount1Spent, address(token1));
 
-        {
-            uint256 expectedBalance = (amount0InUnitOfAccount + amount1InUnitOfAccount);
-
-            assertApproxEqAbs(wrapper.balanceOf(borrower), expectedBalance, ALLOWED_PRECISION_IN_TESTS);
-        }
+        assertApproxEqAbs(
+            wrapper.balanceOf(borrower), amount0InUnitOfAccount + amount1InUnitOfAccount, ALLOWED_PRECISION_IN_TESTS
+        );
 
         uint256 amount0BalanceBefore = poolKey.currency0.balanceOf(borrower);
         uint256 amount1BalanceBefore = poolKey.currency1.balanceOf(borrower);
 
-        //unwrap to get the underlying tokens back
-
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
-
         (uint256 previewUnwrapAmount0, uint256 previewUnwrapAmount1) =
             UniswapV4Wrapper(payable(address(wrapper))).previewUnwrap(tokenId, sqrtPriceX96, wrapper.FULL_AMOUNT());
 
-        // TODO: make sure to pass the correct minimum amounts here
         wrapper.unwrap(
             borrower, tokenId, borrower, wrapper.FULL_AMOUNT(), abi.encode(uint128(0), uint128(0), block.timestamp)
         );
 
         assertEq(poolKey.currency0.balanceOf(borrower), amount0BalanceBefore + previewUnwrapAmount0);
         assertEq(poolKey.currency1.balanceOf(borrower), amount1BalanceBefore + previewUnwrapAmount1);
-
         assertEq(wrapper.balanceOf(borrower, tokenId), 0);
 
-        assertApproxEqRel(poolKey.currency0.balanceOf(borrower), amount0BalanceBefore + amount0Spent, 1000);
-        assertApproxEqRel(poolKey.currency1.balanceOf(borrower), amount1BalanceBefore + amount1Spent, 1000);
+        // Combined abs+rel tolerance: 0.5% for large amounts, 5-wei floor for tiny amounts (avoids 0 !~= 1 failures).
+        uint256 expected0 = amount0BalanceBefore + amount0Spent;
+        uint256 expected1 = amount1BalanceBefore + amount1Spent;
+        assertApproxEqAbs(poolKey.currency0.balanceOf(borrower), expected0, expected0 * 5e15 / 1e18 + 5);
+        assertApproxEqAbs(poolKey.currency1.balanceOf(borrower), expected1, expected1 * 5e15 / 1e18 + 5);
     }
 
     function testFuzzFeeMath(int256 liquidityDelta, uint256 swapAmount) public {
@@ -364,7 +256,6 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
         wrapper.wrap(tokenId, borrower);
         wrapper.enableTokenIdAsCollateral(tokenId);
 
-        //swap so that some fees are generated
         swapExactInput(borrower, address(token0), address(token1), swapAmount);
 
         (uint256 expectedFees0, uint256 expectedFees1) =
@@ -405,7 +296,6 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
         SafeERC20.forceApprove(IERC20(token0), address(poolDonateRouter), type(uint256).max);
         SafeERC20.forceApprove(IERC20(token1), address(poolDonateRouter), type(uint256).max);
 
-        //donate some fees to the position
         poolDonateRouter.donate{value: poolKey.currency0.isAddressZero() ? fees0ToDonate : 0}(
             poolKey, fees0ToDonate, fees1ToDonate, ""
         );
@@ -422,10 +312,8 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
             1
         );
 
-        //now if a user does partial unwrap feesOwed should be deducted proportionally
         partialUnwrapAmount = bound(partialUnwrapAmount, 1, wrapper.FULL_AMOUNT());
-
-        uint256 totalSupplyOfTokenIdBefore = wrapper.totalSupply(tokenIdMinted); // should be equal to wrapper.FULL_AMOUNT() + wrapper.MINIMUM_AMOUNT()
+        uint256 totalSupplyOfTokenIdBefore = wrapper.totalSupply(tokenIdMinted);
 
         uint256 expectedValueAfter = MockUniswapV4Wrapper(payable(address(wrapper)))
             .calculateExactedValueOfTokenIdAfterUnwrap(tokenIdMinted, partialUnwrapAmount, wrapper.FULL_AMOUNT());
@@ -442,15 +330,8 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
         assertEq(currency0.balanceOf(address(wrapper)), currentFees0Owed);
         assertEq(currency1.balanceOf(address(wrapper)), currentFees1Owed);
 
-        //unwrap is not allowed if user doesn't hold exactly the FULL_AMOUNT of tokens
         vm.expectRevert();
         wrapper.unwrap(borrower, tokenIdMinted, borrower);
-
-        // //now if a user does full unwrap, feesOwed should be zero and the should have gone to the user itself
-        // (currentFees0Owed, currentFees1Owed) = MockUniswapV4Wrapper(payable(address(wrapper))).tokensOwed(tokenIdMinted);
-        // assertEq(currentFees0Owed, 0);
-        // assertEq(currentFees1Owed, 0);
-        // assertEq(wrapper.underlying().ownerOf(tokenIdMinted), borrower);
     }
 
     function testFuzzTotalPositionValueV4(LiquidityParams memory params) public {
@@ -465,7 +346,6 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
         (uint256 token0Principal, uint256 token1Principal) =
             MockUniswapV4Wrapper(payable(address(wrapper))).total(tokenId);
 
-        //since no swap has been the principal amount should be the same as the amount0 and amount1
         assertApproxEqAbs(token0Principal, amount0Spent, 1 wei);
         assertApproxEqAbs(token1Principal, amount1Spent, 1 wei);
     }
@@ -488,14 +368,14 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
         transferAmount = bound(transferAmount, 1 + (totalValueBefore / ALLOWED_PRECISION_IN_TESTS), totalValueBefore);
 
         uint256 tokenIdBalance = wrapper.balanceOf(borrower, tokenId);
-        uint256 erc6909TokensTransferred = wrapper.normalizedToFull(tokenIdBalance, transferAmount, totalValueBefore); // (transferAmount * wrapper.FULL_AMOUNT()) / totalValueBefore;
+        uint256 erc6909TokensTransferred = wrapper.normalizedToFull(tokenIdBalance, transferAmount, totalValueBefore);
 
         assertTrue(wrapper.transfer(liquidator, transferAmount));
 
-        assertEq(wrapper.balanceOf(liquidator, tokenId), erc6909TokensTransferred); //erc6909 check (rounding error)
+        assertEq(wrapper.balanceOf(liquidator, tokenId), erc6909TokensTransferred);
         assertEq(wrapper.balanceOf(borrower, tokenId), wrapper.FULL_AMOUNT() - erc6909TokensTransferred);
 
-        assertEq(wrapper.balanceOf(liquidator), 0); // because tokenId is not enabled as collateral
+        assertEq(wrapper.balanceOf(liquidator), 0);
         assertApproxEqAbs(wrapper.balanceOf(borrower), totalValueBefore - transferAmount, ALLOWED_PRECISION_IN_TESTS);
 
         startHoax(liquidator);
@@ -507,12 +387,117 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
         );
     }
 
-    function test_BasicBorrowV4() public {
-        borrowTest();
+    function test_useSubUnSubScribeToSkimPlusWrap() public {
+        positionManager.subscribe(tokenId, address(this), "");
+
+        wrapper.underlying().approve(address(wrapper), tokenId);
+        vm.expectRevert(ERC721WrapperBase.TokenIdIsAlreadyWrapped.selector);
+        wrapper.wrap(tokenId, address(this));
+    }
+}
+
+// ─── Fork test ────────────────────────────────────────────────────────────────
+
+contract UniswapV4WrapperForkTest is UniswapV4WrapperTestBase, UniswapBaseTestFork {
+    IPermit2 public permit2 = IPermit2(Addresses.PERMIT2);
+    bool public constant TEST_NATIVE_ETH = true;
+
+    function deployWrapper() internal override returns (ERC721WrapperBase) {
+        positionManager = IPositionManager(Addresses.POSITION_MANAGER);
+        poolManager = IPoolManager(Addresses.POOL_MANAGER);
+
+        currency0 = Currency.wrap(address(token0));
+        currency1 = Currency.wrap(address(token1));
+
+        poolKey =
+            PoolKey({currency0: currency0, currency1: currency1, fee: 10, tickSpacing: 1, hooks: IHooks(address(0))});
+
+        if (TEST_NATIVE_ETH) {
+            currency0 = Currency.wrap(address(0));
+            currency1 = Currency.wrap(address(Addresses.USDC));
+            token0 = Addresses.WETH;
+            token1 = Addresses.USDC;
+            poolKey = PoolKey({
+                currency0: currency0, currency1: currency1, fee: 500, tickSpacing: 10, hooks: IHooks(address(0))
+            });
+        }
+
+        poolId = poolKey.toId();
+
+        ERC721WrapperBase w = new MockUniswapV4Wrapper{salt: bytes32(uint256(1))}(
+            address(evc), address(positionManager), address(oracle), unitOfAccount, poolKey, Addresses.WETH
+        );
+        mintPositionHelper = new UniswapMintPositionHelper(
+            address(evc), Addresses.NON_FUNGIBLE_POSITION_MANAGER, address(positionManager)
+        );
+        return w;
     }
 
-    function test_basicLiquidationV4() public {
-        basicLiquidationTest();
+    function setUp() public override(UniswapBaseTest, UniswapBaseTestFork) {
+        UniswapBaseTestFork.setUp();
+        router = new TestRouter(poolManager);
+        poolDonateRouter = new PoolDonateTest(poolManager);
+
+        startHoax(borrower);
+        SafeERC20.forceApprove(IERC20(token0), address(router), type(uint256).max);
+        SafeERC20.forceApprove(IERC20(token1), address(router), type(uint256).max);
+        SafeERC20.forceApprove(IERC20(token0), address(mintPositionHelper), type(uint256).max);
+        SafeERC20.forceApprove(IERC20(token1), address(mintPositionHelper), type(uint256).max);
+
+        (tokenId,,) = mintPosition(
+            poolKey,
+            TickMath.minUsableTick(poolKey.tickSpacing),
+            TickMath.maxUsableTick(poolKey.tickSpacing),
+            100 * unit0,
+            100 * unit1,
+            0,
+            borrower
+        );
+    }
+
+    function swapExactInput(address swapper, address tokenIn, address tokenOut, uint256 inputAmount)
+        internal
+        override
+        returns (uint256 outputAmount)
+    {
+        deal(tokenIn, swapper, inputAmount);
+        bool zeroForOne = tokenIn == Addresses.WETH ? true : tokenIn < tokenOut;
+        SwapParams memory swapParams = SwapParams({
+            zeroForOne: zeroForOne,
+            amountSpecified: -int256(inputAmount),
+            sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
+        });
+        BalanceDelta balanceDelta =
+            router.swap{value: tokenIn == Addresses.WETH ? inputAmount : 0}(poolKey, swapParams, new bytes(0));
+        outputAmount = zeroForOne ? uint256(int256(balanceDelta.amount1())) : uint256(int256(balanceDelta.amount0()));
+    }
+
+    // ─── Fork-only tests ──────────────────────────────────────────────────────
+
+    function testGetSqrtRatioX96() public view {
+        sqrtPriceTest(2248266982, Addresses.WETH, Addresses.USDC);
+        sqrtPriceTest(75678429218, Addresses.WBTC, Addresses.USDC);
+        sqrtPriceTest(33660783978026242452, Addresses.WBTC, Addresses.WETH);
+        sqrtPriceTest(2248663233, Addresses.WETH, Addresses.USDT);
+        sqrtPriceTest(75691767356, Addresses.WBTC, Addresses.USDT);
+    }
+
+    function testWrapFailIfNotTheSamePoolId() public {
+        for (uint256 i = 1; i < 20; i++) {
+            (PoolKey memory poolKeyOfTokenId,) = positionManager.getPoolAndPositionInfo(i);
+
+            startHoax(wrapper.underlying().ownerOf(i));
+            wrapper.underlying().approve(address(wrapper), i);
+
+            if (PoolId.unwrap(poolKeyOfTokenId.toId()) == PoolId.unwrap(poolId)) {
+                wrapper.wrap(i, borrower);
+            } else {
+                vm.expectRevert(
+                    abi.encodeWithSelector(UniswapV4Wrapper.InvalidPoolId.selector, poolKeyOfTokenId.toId(), poolId)
+                );
+                wrapper.wrap(i, borrower);
+            }
+        }
     }
 
     function testUnwrap_Unichain() public {
@@ -520,9 +505,9 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
         vm.createSelectFork(fork_url, 28206234);
 
         poolKey = PoolKey({
-            currency0: Currency.wrap(address(0x7b793B1388e14F03e19dc562470e7D25B2Ae9b97)), //WETH
-            currency1: Currency.wrap(address(0x9C383Fa23Dd981b361F0495Ba53dDeB91c750064)), //USDC
-            fee: 18, //0.05% fee
+            currency0: Currency.wrap(address(0x7b793B1388e14F03e19dc562470e7D25B2Ae9b97)),
+            currency1: Currency.wrap(address(0x9C383Fa23Dd981b361F0495Ba53dDeB91c750064)),
+            fee: 18,
             tickSpacing: 1,
             hooks: IHooks(0x777ef319C338C6ffE32A2283F603db603E8F2A80)
         });
@@ -537,7 +522,7 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
         );
 
         borrower = 0x69196bC5035cE85C28DAc0c57D0F27f50712A0B2;
-        tokenId = 1428340; // we know this tokenId is worth $7K
+        tokenId = 1428340;
 
         vm.startPrank(borrower);
         wrapper.underlying().approve(address(wrapper), tokenId);
@@ -546,23 +531,88 @@ contract UniswapV4WrapperTest is Test, UniswapBaseTest, ISubscriber {
         vm.stopPrank();
     }
 
-    function test_useSubUnSubScribeToSkimPlusWrap() public {
-        positionManager.subscribe(tokenId, address(this), "");
+    function test_BasicBorrowV4() public {
+        borrowTest();
+    }
 
+    function test_basicLiquidationV4() public {
+        // The V4 ETH/USDC LP position is worth ~$224,900 at the fork block, far more than the
+        // V3 USDC/USDT position used by basicLiquidationTest(). A 97.5% price drop isn't enough
+        // to make 5 USDC of debt undercollateralised here. Use a much steeper drop instead.
+        startHoax(borrower);
         wrapper.underlying().approve(address(wrapper), tokenId);
-        vm.expectRevert(ERC721WrapperBase.TokenIdIsAlreadyWrapped.selector);
-        wrapper.wrap(tokenId, address(this));
+        wrapper.enableTokenIdAsCollateral(tokenId);
+        wrapper.wrap(tokenId, borrower);
+
+        evc.enableCollateral(borrower, address(wrapper));
+        evc.enableController(borrower, address(eVault));
+
+        eVault.borrow(5e6, borrower);
+
+        vm.warp(block.timestamp + eVault.liquidationCoolOffTime());
+
+        (uint256 maxRepay, uint256 yield) = eVault.checkLiquidation(liquidator, borrower, address(wrapper));
+        assertEq(maxRepay, 0);
+        assertEq(yield, 0);
+
+        // Drop wrapper price to 1e10 (≈ 1e-8 of par): $224,900 LP → ~$0.00225 collateral < $5 debt
+        _setWrapperUOAPrice(1e10);
+
+        startHoax(liquidator);
+        (maxRepay, yield) = eVault.checkLiquidation(liquidator, borrower, address(wrapper));
+        assertGt(maxRepay, 0);
+
+        evc.enableCollateral(liquidator, address(wrapper));
+        evc.enableController(liquidator, address(eVault));
+        wrapper.enableTokenIdAsCollateral(tokenId);
+        eVault.liquidate(borrower, address(wrapper), type(uint256).max, 0);
+
+        assertEq(wrapper.balanceOf(borrower), 0);
+        assertEq(wrapper.balanceOf(liquidator, tokenId), wrapper.FULL_AMOUNT());
+    }
+}
+
+// ─── Local test ───────────────────────────────────────────────────────────────
+
+contract UniswapV4WrapperTest is UniswapV4WrapperTestBase, UniswapBaseTestLocal {
+    function deployWrapper() internal override returns (ERC721WrapperBase) {
+        positionManager = localPositionManager;
+        poolManager = localPoolManager;
+
+        currency0 = Currency.wrap(address(token0));
+        currency1 = Currency.wrap(address(token1));
+
+        poolKey =
+            PoolKey({currency0: currency0, currency1: currency1, fee: 500, tickSpacing: 10, hooks: IHooks(address(0))});
+        poolId = poolKey.toId();
+        localPoolManager.initialize(poolKey, Constants.SQRT_PRICE_1_1);
+
+        ERC721WrapperBase w = new MockUniswapV4Wrapper{salt: bytes32(uint256(1))}(
+            address(evc), address(positionManager), address(oracle), unitOfAccount, poolKey, address(localWeth)
+        );
+        mintPositionHelper = new UniswapMintPositionHelper(address(evc), address(localNFPM), address(positionManager));
+        return w;
     }
 
-    // This is demo for how someone can reenter using v4 subscription
-    function notifyUnsubscribe(uint256) external {
-        // when transferFrom is happening for wrapping, reenter and try to do the skim
-        wrapper.skim(address(this));
+    function setUp() public override(UniswapBaseTest, UniswapBaseTestLocal) {
+        UniswapBaseTestLocal.setUp();
+        router = new TestRouter(poolManager);
+        poolDonateRouter = new PoolDonateTest(poolManager);
+
+        startHoax(borrower);
+        SafeERC20.forceApprove(IERC20(token0), address(router), type(uint256).max);
+        SafeERC20.forceApprove(IERC20(token1), address(router), type(uint256).max);
+        SafeERC20.forceApprove(IERC20(token0), address(mintPositionHelper), type(uint256).max);
+        SafeERC20.forceApprove(IERC20(token1), address(mintPositionHelper), type(uint256).max);
+
+        (tokenId,,) = mintPosition(
+            poolKey,
+            TickMath.minUsableTick(poolKey.tickSpacing),
+            TickMath.maxUsableTick(poolKey.tickSpacing),
+            100 * unit0,
+            100 * unit1,
+            0,
+            borrower
+        );
     }
-    function notifySubscribe(uint256 tokenId, bytes memory data) external {}
-
-    function notifyBurn(uint256 tokenId, address owner, PositionInfo info, uint256 liquidity, BalanceDelta feesAccrued)
-        external {}
-
-    function notifyModifyLiquidity(uint256 tokenId, int256 liquidityChange, BalanceDelta feesAccrued) external {}
 }

@@ -25,6 +25,7 @@ contract UniswapV3Wrapper is ERC721WrapperBase {
     uint256 public immutable unit1; // {unit} = 10**decimals1; one canonical unit of token1
 
     error InvalidPoolAddress();
+    error NothingToCollect();
 
     using SafeCast for uint256;
 
@@ -139,16 +140,27 @@ contract UniswapV3Wrapper is ERC721WrapperBase {
                 amount1ToCollect + proportionalShare((tokensOwed1 - amount1ToCollect), amount, totalSupplyOfTokenId);
         }
 
-        // Collect the computed proportional principal + fees to the recipient
-        INonfungiblePositionManager(address(underlying))
-            .collect(
-                INonfungiblePositionManager.CollectParams({
+        // Revert when nothing would be collected and this is not a user-full-unwrap.
+        // A user-full-unwrap (burning FULL_AMOUNT, leaving only MINIMUM_AMOUNT dust) is allowed
+        // to proceed with zero amounts — it's cleaning up a tiny/out-of-range position.
+        // A partial unwrap that yields nothing must revert to prevent burning shares for nothing.
+        bool isUserFullUnwrap = totalSupplyOfTokenId - amount <= MINIMUM_AMOUNT;
+        if (!isUserFullUnwrap && amount0ToCollect == 0 && amount1ToCollect == 0) {
+            revert NothingToCollect();
+        }
+
+        // Collect the computed proportional principal + fees to the recipient.
+        if (amount0ToCollect > 0 || amount1ToCollect > 0) {
+            INonfungiblePositionManager(address(underlying))
+                .collect(
+                    INonfungiblePositionManager.CollectParams({
                     tokenId: tokenId,
                     recipient: to,
                     amount0Max: amount0ToCollect.toUint128(), // {tok0} total to transfer
                     amount1Max: amount1ToCollect.toUint128() // {tok1} total to transfer
                 })
-            );
+                );
+        }
     }
 
     function _settleFullUnwrap(uint256 tokenId, address to) internal override {}
@@ -174,12 +186,12 @@ contract UniswapV3Wrapper is ERC721WrapperBase {
             (amount0, amount1) = INonfungiblePositionManager(address(underlying))
                 .decreaseLiquidity(
                     INonfungiblePositionManager.DecreaseLiquidityParams({
-                        tokenId: tokenId,
-                        liquidity: liquidity,
-                        amount0Min: amount0Min,
-                        amount1Min: amount1Min,
-                        deadline: deadline
-                    })
+                    tokenId: tokenId,
+                    liquidity: liquidity,
+                    amount0Min: amount0Min,
+                    amount1Min: amount1Min,
+                    deadline: deadline
+                })
                 );
         }
     }

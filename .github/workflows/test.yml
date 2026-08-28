@@ -5,9 +5,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-env:
-  FOUNDRY_PROFILE: ci
-
 jobs:
   check:
     strategy:
@@ -37,10 +34,18 @@ jobs:
           forge build --sizes
         id: build
 
-      - name: Run Forge tests
+      - name: Run local tests
         run: |
-          forge test -vvv
+          forge test -vvv --no-match-contract "ForkTest"
         env:
+          FOUNDRY_PROFILE: ci
+        id: test-local
+
+      - name: Run fork tests
+        run: |
+          forge test -vvv --match-contract "ForkTest"
+        env:
+          FOUNDRY_PROFILE: ci-fork
           MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
           UNICHAIN_RPC_URL: ${{ secrets.UNICHAIN_RPC_URL }}
-        id: test
+        id: test-fork
